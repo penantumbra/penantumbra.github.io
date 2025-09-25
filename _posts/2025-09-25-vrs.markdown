@@ -1,0 +1,12 @@
+---
+layout: post
+title:  "VRS The Invisble Scenes"
+categories: ideas
+---
+
+Tier 2 VRS provides a way to specify a shading rate texture for rasterization. Content rendered behind the UI can use a lower shading rate to reduce pixel shader workload.
+
+Questions:
+1. How can the shading rate texture be made conservative, given that shading rate textures do not have a 1:1 correspondence with the scene color texture, but instead use 8x8 tiles?
+2. How should latency be handled when the UI moves, appears, or disappears?
+3. Translucent UI?

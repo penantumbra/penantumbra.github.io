@@ -1,0 +1,27 @@
+---
+layout: post
+title:  "Reduce unreal shader permutation"
+categories: ideas
+---
+
+## UE4 Shader Count
+
+ShaderPermutationCount for a material = VertexFactory Count * ShaderType Count * Quality Level Count
+
+## Optimize VertexFactory
+
+...
+
+## Optimize ShaderType
+
+remove unused lightmappolicy
+
+enable shader permutation optimziations in project settings
+
+disable static lighting?
+
+## Optimize Quality Level
+
+drop unreal's scalibility, use sample count controlled by shader parameter instead of QUALITY_LEVEL_1/2/3
+
+e.g. SHADOW_QUALITY
