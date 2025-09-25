@@ -4,6 +4,8 @@ title:  "Shader Optimization Cheatsheet"
 categories: ideas
 ---
 
+my shader programming cheatsheet
+
 ## MAD
 
 make your shader fit multi-add way, it may optimized by compiler to one MAD instruction.

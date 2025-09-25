@@ -4,6 +4,8 @@ title:  "Reduce unreal shader permutation"
 categories: ideas
 ---
 
+some ways to reduce ue4 shader permutation count
+
 ## UE4 Shader Count
 
 ShaderPermutationCount for a material = VertexFactory Count * ShaderType Count * Quality Level Count
