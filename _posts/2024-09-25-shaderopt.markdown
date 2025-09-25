@@ -68,7 +68,7 @@ long shader are less efficient than shorter one
 
 don't unroll complex loop
 
-``
+```hlsl
 [loop]
 for (int i = 0; i < 64; i++)
 {
@@ -93,7 +93,7 @@ else if (b)
 
 heavycomputation will be inlined twice, following code is better
 
-```
+```hlsl
 int param;
 if (a)
 {
