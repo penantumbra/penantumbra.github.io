@@ -1,0 +1,22 @@
+---
+layout: post
+title:  " Compute Shader cheatsheet"
+categories: ideas
+---
+
+...
+
+## Compute Shader Basics
+
+GPU are designed to execute paralled works, we can divide paralled graphics or non-graphics works into group to utilize gpu.
+
+
+## Sync
+
+### Shared Memory
+
+## WorkGroupSize
+
+## CS vs PS
+
+### Mobile
