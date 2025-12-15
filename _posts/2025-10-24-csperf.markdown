@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  " Compute Shader cheatsheet"
+title:  "(WIP) Compute Shader cheatsheet"
 categories: ideas
 ---
 
