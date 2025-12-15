@@ -1,11 +1,10 @@
 ---
 layout: post
-title:  "UE4 IndirectLight"
+title:  "Unreal Diffuse Indirect Light Explain"
 categories: ideas
 ---
 
 ...
-
 
 ## LightMap
 
