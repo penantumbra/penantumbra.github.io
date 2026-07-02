@@ -9,7 +9,6 @@ categories: ideas
 
 ## SVGF
 
-Demodulate Albedo
 计算光照时忽略brdf中的材质信息，避免引入高频变化，以diffuse为例
 diffuse = L* rho * n * l / pi
 demodulate albedo = L * n * l / pi
@@ -21,6 +20,7 @@ Variance Esitimation
 Edge-Avoiding Atrous Wavelets
 Wavelet filter用于大范围滤波
 法线/深度作为edge avoiding算法避免模糊掉几何边缘
+
 $$\hat{c}_{i+1}(p)
 =
 \frac{
@@ -48,6 +48,7 @@ color_out[p] = sum / weight_sum;
 
 Luminance Edge Stopping Function
 避免模糊掉阴影细节，通过上面计算的variance
+
 $$w(p,q)
 =
 \exp\left(
