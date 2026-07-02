@@ -1,0 +1,717 @@
+---
+layout: post
+title:  "Q2RTX codepath"
+categories: ideas
+---
+
+...
+
+
+## Q2RTX codepath
+
+
+```
+#define MATERIAL_KIND_MASK           0xf0000000
+#define MATERIAL_KIND_INVALID        0x00000000
+#define MATERIAL_KIND_REGULAR        0x10000000
+#define MATERIAL_KIND_CHROME         0x20000000
+#define MATERIAL_KIND_WATER          0x30000000
+#define MATERIAL_KIND_LAVA           0x40000000
+#define MATERIAL_KIND_SLIME          0x50000000
+#define MATERIAL_KIND_GLASS          0x60000000
+#define MATERIAL_KIND_SKY            0x70000000
+#define MATERIAL_KIND_INVISIBLE      0x80000000
+#define MATERIAL_KIND_EXPLOSION      0x90000000
+#define MATERIAL_KIND_TRANSPARENT    0xa0000000 // Transparent walls. Have a distortion effect applied.
+#define MATERIAL_KIND_SCREEN         0xb0000000
+#define MATERIAL_KIND_CAMERA         0xc0000000
+#define MATERIAL_KIND_CHROME_MODEL   0xd0000000
+#define MATERIAL_KIND_TRANSP_MODEL   0xe0000000 // Transparent models. No distortion, just "see through".
+
+
+struct RayPayloadGeometry {
+   vec2 barycentric;
+   /* two packed 16 bit integers, buffer index in low 16 bits and
+    * instance index in high 16 bits */
+   int buffer_and_instance_idx;
+   uint primitive_id;
+   float hit_distance;
+};
+
+struct RayPayloadEffects {
+   uvec2 transparency; // half4x16
+   uint distances; // half2x16 - min and max
+   uvec4 fog1; // half8x16: .xy = color.rgba; .z = t_min, t_max; .w = density: a and b for (a*t + b)
+   uvec4 fog2; // same as fog1 but for a fog volume further away
+#ifndef KHR_RAY_QUERY
+   // Store TMax in the payload because gl_RayTmaxEXT changes while the ray is being traced.
+   // See the GLSL_EXT_ray_tracing spec near "description for gl_RayTminEXT and gl_RayTmaxEXT"
+   // https://github.com/KhronosGroup/GLSL/blob/master/extensions/ext/GLSL_EXT_ray_tracing.txt 
+   float rayTmax; 
+#endif
+};
+
+layout(location = RT_PAYLOAD_GEOMETRY) rayPayloadEXT RayPayloadGeometry ray_payload_geometry;
+layout(location = RT_PAYLOAD_EFFECTS) rayPayloadEXT RayPayloadEffects ray_payload_effects;
+```
+
+
+
+
+
+
+
+
+```
+// primary ray
+vkpt_pt_trace_primary_rays(trace_cmd_buf);
+// qvkCmdTraceRaysKHR(cmd_buf,
+//  &raygen,
+//  &miss_and_hit,
+//  &miss_and_hit,
+//  &callable,
+//  width/2, height, depth); // 2 depth for checkerboard rendering, split
+vkpt_submit_command_buffer();
+
+// indirect reflection/refraction
+if (ref_mode.reflect_refract > 0)
+    vkpt_pt_trace_reflections(trace_cmd_buf, 0);
+    
+// multiple reflection/refraction
+if (ref_mode.reflect_refract > 1)
+    for (int pass = 0; pass < ref_mode.reflect_refract - 1; pass++)
+        vkpt_pt_trace_reflections(trace_cmd_buf, pass + 1);
+
+// seperated svgf reprojected pass
+vkpt_asvgf_gradient_reproject(trace_cmd_buf);
+
+vkpt_pt_trace_lighting(trace_cmd_buf, ref_mode.num_bounce_rays);
+
+vkpt_submit_command_buffer();
+
+vkpt_asvgf_filter(post_cmd_buf, cvar_pt_num_bounce_rays->value >= 0.5f);
+
+vkpt_interleave(post_cmd_buf);
+
+vkpt_taa(post_cmd_buf);
+
+vkpt_bloom_record_cmd_buffer(post_cmd_buf);
+vkpt_tone_mapping_record_cmd_buffer();
+vkpt_fsr_do(post_cmd_buf);
+vkpt_submit_command_buffer_simple();
+```
+
+
+
+
+
+
+
+
+
+primary_rays.rgen(path tracer overview的1)
+```
+ // generate primary ray information, including bias offset to get depth of field
+Ray ray = get_primary_ray(inUV);
+
+
+// primary ray -> path_tracer.rchit/path_tracer.rmiss
+traceRayEXT( topLevelAS[TLAS_INDEX_GEOMETRY], rayFlags, instance_mask,
+        SBT_RCHIT_GEOMETRY /*sbtRecordOffset*/, 0 /*sbtRecordStride*/, SBT_RMISS_EMPTY /*missIndex*/,
+        ray.origin, ray.t_min, ray.direction, ray.t_max, RT_PAYLOAD_GEOMETRY);
+
+Triangle triangle;
+
+if (found_intersection(ray_payload_geometry)) // hit surface
+{
+    ray.t_max = ray_payload_geometry.hit_distance;
+    triangle = get_hit_triangle(ray_payload_geometry);
+}
+// particle/explosion/sprite/beam
+traceRayEXT( topLevelAS[TLAS_INDEX_EFFECTS], rayFlags, instance_mask,
+        SBT_RCHIT_EFFECTS /*sbtRecordOffset*/, 0 /*sbtRecordStride*/, SBT_RMISS_EMPTY /*missIndex*/,
+        ray.origin, ray.t_min, ray.direction, ray.t_max, RT_PAYLOAD_EFFECTS);
+
+vec4 effects = get_payload_transparency_with_fog(ray_payload_effects, ray.t_max);
+
+vec3 bary = get_hit_barycentric(ray_payload_geometry);
+
+// store 2 visibility buffer
+{
+    uvec2 vis_buf;
+    vis_buf.x = triangle.instance_index;
+    vis_buf.y = triangle.instance_prim;
+    imageStore(IMG_PT_VISBUF_PRIM_A, ipos, uvec4(vis_buf, 0, 0)); // rg32ui / R32G32_UINT
+    imageStore(IMG_PT_VISBUF_BARY_A, ipos, vec4(bary.yz, 0, 0)); // rg16f / R16G16_SFLOAT
+}
+
+// get hit point information
+vec3 position = triangle.positions * bary;
+vec2 texcoord = triangle.texcoords * bary;
+vec3 geo_normal = triangle.normals* bary;
+vec3 flat_normal = normalize(cross(
+        triangle.positions[1] - triangle.positions[0],
+        triangle.positions[2] - triangle.positions[1]));
+
+/* compute view-space derivatives of depth and motion vectors */
+Ray ray_0 = get_primary_ray(inUV);
+Ray ray_x = get_primary_ray(inUV + vec2(1.0 / float(global_ubo.width), 0));
+Ray ray_y = get_primary_ray(inUV + vec2(0, 1.0 / float(global_ubo.height)));
+
+// larger coneangle means high gradient, means higher mips
+float half_cone_angle = sqrt(1.0 - square(min(
+dot(ray_0.direction, ray_x.direction), 
+dot(ray_0.direction, ray_y.direction))));
+
+vec2 tex_coord_x, tex_coord_y;
+float fwidth_depth;
+// get texure lod
+compute_anisotropic_texture_gradients(position, flat_normal, ray.direction, 
+    ray_payload_geometry.hit_distance * half_cone_angle, triangle.positions, 
+    triangle.tex_coords, tex_coord, tex_coord_x, tex_coord_y, fwidth_depth);
+
+vec3 pos_ws_curr = position;
+vec3 pos_ws_prev = triangle.positions_prev * bary;
+vec2 screen_pos_curr, screen_pos_prev;
+float distance_curr, distance_prev;
+projection_view_to_screen((global_ubo.V * vec4(pos_ws_curr, 1)).xyz, screen_pos_curr, distance_curr, false);
+projection_view_to_screen((global_ubo.V_prev * vec4(pos_ws_prev, 1)).xyz, screen_pos_prev, distance_prev, true);
+
+// motion vector
+vec3 motion;
+motion.xy = screen_pos_prev - screen_pos_curr;
+motion.z = distance_prev - distance_curr;
+
+imageStore(IMG_PT_VIEW_DEPTH_A, ipos, vec4(distance_curr));
+imageStore(IMG_PT_MOTION, ipos, vec4(motion, fwidth_depth));
+
+// Get the primary surface material parameters
+get_material(
+    triangle,
+    bary,
+    tex_coord,
+    tex_coord_x,
+    tex_coord_y,
+    -1,
+    geo_normal,
+    primary_base_color,
+    normal,
+    primary_metallic,
+    primary_roughness,
+    primary_emissive,
+    primary_specular_factor);
+
+// get mat id
+uint material_id = triangle.material_id;
+...
+
+// handle various material one by one
+
+// write to gbuffer
+// shading normal
+imageStore(IMG_PT_NORMAL_A, ipos, uvec4(encode_normal(normal)));
+// geo normal
+imageStore(IMG_PT_GEO_NORMAL_A, ipos, uvec4(encode_normal(geo_normal)));
+//...
+imageStore(IMG_PT_SHADING_POSITION, ipos, vec4(position.xyz, uintBitsToFloat(material_id)));
+//...
+imageStore(IMG_PT_VIEW_DIRECTION, ipos, vec4(direction, float(checkerboard_flags)));
+imageStore(IMG_PT_THROUGHPUT, ipos, vec4(throughput, distance_curr));
+imageStore(IMG_PT_BOUNCE_THROUGHPUT, ipos, vec4(1, 1, 1, half_cone_angle));
+imageStore(IMG_PT_CLUSTER_A, ipos, ivec4(triangle.cluster));
+imageStore(IMG_PT_BASE_COLOR_A, ipos, vec4(primary_base_color, primary_specular_factor));
+imageStore(IMG_PT_METALLIC_A, ipos, vec4(primary_metallic, primary_roughness, 0, 0));
+imageStore(IMG_PT_GODRAYS_THROUGHPUT_DIST, ipos, vec4(1, 1, 1, distance_curr));
+transparent = alpha_blend_premultiplied(effects, transparent);
+
+imageStore(IMG_PT_TRANSPARENT, ipos, transparent);
+```
+
+
+
+
+
+
+
+
+
+reflect_refract.rgen
+
+reflect_refract.rgen 会在 G-buffer 当前 surface 是 water / slime / glass / chrome / screen / camera / transparent 等特殊材质时，每像素沿 reflection 或 refraction 方向继续追一条 ray，并用命中的 secondary surface 更新 G-buffer / throughput / medium / motion。下面的 IOR + checkerboard 代码是抽象伪码；真实代码会按 material kind 分支处理 thin/thick glass、water/slime medium、total internal reflection、chrome/screen 只反射、transparent see-through 等情况。
+```
+// get shading pos
+vec4 position_material = imageLoad(IMG_PT_SHADING_POSITION, ipos);
+
+if(!( primary_is_water || 
+      primary_is_slime || 
+      primary_is_glass || 
+      primary_is_chrome || 
+      primary_is_screen || 
+      primary_is_camera || 
+      primary_is_transparent ))
+    return;
+    
+index_of_refraction = get_mat_ior();
+vec3 refracted_direction = refract(direction, normal, index_of_refraction);
+float F = pow(1.0 - n_dot_v, 5.0);
+do_refraction = is_odd_checkerboard && F < 1;
+direction = do_refraction ? refract() : reflect();
+correction_factor *= 2; // 补能量
+throughput *= correction_factor;
+primary_medium = new_medium;//更新介质
+
+int reflection_cull_mask = REFLECTION_RAY_CULL_MASK|xxx;
+
+Ray reflection_ray;
+reflection_ray.origin = position;
+reflection_ray.direction = direction;
+
+trace_geometry_ray(reflection_ray, backface_culling, reflection_cull_mask);
+Triangle triangle;
+
+if (found_intersection(ray_payload_geometry))
+{
+    reflection_ray.t_max = ray_payload_geometry.hit_distance;
+    triangle = get_hit_triangle(ray_payload_geometry);
+}
+
+vec4 effects = trace_effects_ray(reflection_ray, /* skip_procedural = */ false);
+
+// almost same with primary ray
+...
+// update gbuffer
+```
+
+
+
+
+
+
+
+
+
+
+asvgf_gradient_reproject.comp
+
+direct_lighting.rgen// direct diffuse + direct sun shadow
+```
+vec3 high_freq, specular;
+direct_lighting(ipos, is_odd_checkerboard, high_freq, specular);
+
+vec4 view_direction = texelFetch(TEX_PT_VIEW_DIRECTION, ipos, 0);
+vec3 normal = decode_normal(texelFetch(TEX_PT_NORMAL_A, ipos, 0).x);
+vec3 geo_normal = decode_normal(texelFetch(TEX_PT_GEO_NORMAL_A, ipos, 0).x);
+vec4 primary_base_color = texelFetch(TEX_PT_BASE_COLOR_A, ipos, 0);
+float primary_specular_factor = primary_base_color.a;
+vec2 metal_rough = texelFetch(TEX_PT_METALLIC_A, ipos, 0).xy;
+float primary_metallic = metal_rough.x;
+float primary_roughness = metal_rough.y;
+uint cluster_idx = texelFetch(TEX_PT_CLUSTER_A, ipos, 0).x;
+
+vec3 primary_albedo, primary_base_reflectivity;
+get_reflectivity(primary_base_color.rgb, primary_metallic, primary_albedo, primary_base_reflectivity);
+
+// precompute phong coeff
+float alpha = square(roughness);
+float phong_exp = RoughnessSquareToSpecPower(alpha);
+float phong_scale = min(100, 1 / (M_PI * square(alpha)));
+float phong_weight = clamp(specular_factor * luminance(base_reflectivity) / (luminance(base_reflectivity) + luminance(albedo)), 0, 0.9);
+
+/*
+get_direct_illumination(
+    position, 
+    normal, 
+    geo_normal, 
+    cluster_idx, 
+    material_id, 
+    shadow_cull_mask, 
+    view_direction.xyz, 
+    primary_albedo,
+    primary_base_reflectivity,
+    primary_specular_factor,
+    primary_roughness, 
+    primary_medium, 
+    spec_enable_caustics != 0, 
+    direct_specular_weight, 
+    global_ubo.pt_direct_polygon_lights > 0,
+    global_ubo.pt_direct_dyn_lights > 0,
+    is_gradient,
+    0,
+    direct_diffuse,
+    direct_specular);
+*/
+
+//  sample a static light
+// 1. 重要性采样：从很多 polygon lights 里选一个 light
+// float m = spherical_tri_area(light.positions, p, n, V, phong_exp, phong_scale, phong_weight);
+// float light_lum = luminance(light.color);
+// m *= abs(light_lum);
+// 2. 几何采样：在这个 light 的三角形上选一个点
+sample_polygonal_lights(
+    cluster_idx,
+    position, 
+    normal, 
+    geo_normal, 
+    view_direction, 
+    phong_exp, 
+    phong_scale,
+    phong_weight, 
+    is_gradient, 
+    pos_on_light_polygonal, 
+    contrib_polygonal,
+    polygonal_light_index,
+    polygonal_light_pdfw,
+    polygonal_light_is_sky,
+    rng);
+    // Limit the solid angle of sphere lights for indirect lighting 
+    // in order to kill some fireflies in locations with many sphere lights.
+    // Example: green wall-lamp corridor in the "train" map.
+    float max_solid_angle = (bounce == 0) ? 2 * M_PI : 0.02;
+
+// sample a dynamic light
+// dynamic lights 内部是在 num_dyn_lights 中 uniform 选一个 light，pdf = 1 / num_dyn_lights，
+// sample_dynamic_lights 里会乘 num_dyn_lights 做 1/pdf 补偿；sphere/spot 的能量用 analytic irradiance 近似。
+sample_dynamic_lights(
+    position,
+    normal,
+    geo_normal,
+    max_solid_angle,
+    pos_on_light_dynamic,
+    contrib_dynamic,
+    rng);
+
+float spec_polygonal = phong(normal, normalize(pos_on_light_polygonal - position), view_direction, phong_exp) * phong_scale;
+float spec_dynamic = phong(normal, normalize(pos_on_light_dynamic - position), view_direction, phong_exp) * phong_scale;
+
+// compute luminance of two light
+float l_polygonal  = luminance(abs(contrib_polygonal)) * mix(1, spec_polygonal, phong_weight);
+float l_dynamic = luminance(abs(contrib_dynamic)) * mix(1, spec_dynamic, phong_weight);
+float l_sum = l_polygonal + l_dynamic;
+
+bool null_light = (l_sum == 0);
+
+float w = null_light ? 0.5 : l_polygonal / (l_polygonal + l_dynamic);
+
+// random chose one, polygon or dynamic
+float rng2 = get_rng(RNG_NEE_LIGHT_TYPE(bounce));
+is_polygonal = (rng2 < w);
+vis = is_polygonal ? (1 / w) : (1 / (1 - w));
+vec3 pos_on_light = null_light ? position : (is_polygonal ? pos_on_light_polygonal : pos_on_light_dynamic);
+vec3 contrib = is_polygonal ? contrib_polygonal : contrib_dynamic;
+
+Ray shadow_ray = get_shadow_ray(position - view_direction * 0.01, pos_on_light, 0);
+
+vis *= trace_shadow_ray(shadow_ray, null_light ? 0 : shadow_cull_mask);
+
+// TODO, Adaptive Shadow Testing for Ray Tracing, Ward 1994 optimization
+
+vec3 radiance = vis * contrib;
+
+vec3 L = pos_on_light - position;
+L = normalize(L);
+
+// specular lighting
+
+if(is_polygonal && direct_specular_weight > 0 && polygonal_light_is_sky && global_ubo.pt_specular_mis != 0)
+{
+    // MIS with direct specular and indirect specular.
+    // Only applied to sky lights, for two reasons:
+    //  1) Non-sky lights are trimmed to match the light texture, and indirect rays don't see that;
+    //  2) Non-sky lights are usually away from walls, so the direct sampling issue is not as pronounced.
+
+    direct_specular_weight *= get_specular_sampled_lighting_weight(roughness,
+        normal, -view_direction, L, polygonal_light_pdfw);
+}
+
+vec3 F = vec3(0);
+
+if(vis > 0 && direct_specular_weight > 0)
+{
+    vec3 specular_brdf = GGX_times_NdotL(view_direction, normalize(pos_on_light - position),
+        normal, roughness, base_reflectivity, 0.0, specular_factor, F);
+    specular = radiance * specular_brdf * direct_specular_weight;
+}
+
+float NdotL = max(0, dot(normal, L));
+
+// diffuse lighting
+
+float diffuse_brdf = NdotL / M_PI;
+diffuse = radiance * diffuse_brdf * (vec3(1.0) - F);
+
+high_freq += direct_diffuse;
+o_specular += direct_specular;
+/*
+get_sunlight(
+    cluster_idx,
+    material_id,
+    position,
+    normal,
+    geo_normal,
+    view_direction.xyz,
+    primary_base_reflectivity,
+    primary_specular_factor,
+    primary_roughness,
+    primary_medium,
+    spec_enable_caustics != 0,
+    direct_sun_diffuse,
+    direct_sun_specular,
+    shadow_cull_mask);
+*/
+// similar with polygon/dynamic light computation
+
+high_freq += direct_sun_diffuse;
+o_specular += direct_sun_specular;
+
+o_specular = demodulate_specular(primary_base_reflectivity, o_specular);
+
+high_freq = clamp_output(high_freq);
+o_specular = clamp_output(o_specular);
+
+high_freq *= STORAGE_SCALE_HF;//32
+o_specular *= STORAGE_SCALE_SPEC;//32
+imageStore(IMG_PT_COLOR_LF_SH, ipos, vec4(0));
+imageStore(IMG_PT_COLOR_LF_COCG, ipos, vec4(0));
+imageStore(IMG_PT_COLOR_HF, ipos, uvec4(packRGBE(high_freq))); // diffuse
+imageStore(IMG_PT_COLOR_SPEC, ipos, uvec4(packRGBE(o_specular))); // specular
+```
+
+
+
+
+
+
+
+
+
+indirect_lighting.rgen
+```
+// already have primary ray hit surface into
+view_direction = texelFetch(TEX_PT_VIEW_DIRECTION, ipos, 0);
+normal = decode_normal(texelFetch(TEX_PT_NORMAL_A, ipos, 0).x);
+geo_normal = decode_normal(texelFetch(TEX_PT_GEO_NORMAL_A, ipos, 0).x);
+primary_base_color = texelFetch(TEX_PT_BASE_COLOR_A, ipos, 0);
+primary_specular_factor = primary_base_color.a;
+vec2 metal_rough = texelFetch(TEX_PT_METALLIC_A, ipos, 0).xy;
+primary_metallic = metal_rough.x;
+primary_roughness = metal_rough.y;
+
+get_reflectivity(primary_base_color.rgb, primary_metallic, primary_albedo, primary_base_reflectivity);
+float NoV = max(0, -dot(normal, view_direction.xyz));
+// 判断光线类型
+bool is_specular_ray;
+
+// compute the indirect ray direction towards ggx reflection lobe
+if(spec_bounce_index == 0)
+{
+    specular_pdf = (primary_metallic == 1 && fake_specular_weight == 0) ? 1.0 : 0.5;
+    
+    // 50%概率进，specular path
+    if(rng_frensel < specular_pdf) 
+    {
+        mat3 basis = construct_ONB_frisvad(normal);
+
+        // Sampling of normal distribution function to compute the reflected ray.
+        // See the paper "Sampling the GGX Distribution of Visible Normals" by E. Heitz, 
+        // Journal of Computer Graphics Techniques Vol. 7, No. 4, 2018.
+        // http://jcgt.org/published/0007/04/01/paper.pdf 
+
+        vec3 N = normal;
+        vec3 V = view_direction.xyz;
+        vec3 H = ImportanceSampleGGX_VNDF(rng3, primary_roughness, V, basis);
+        vec3 L = reflect(V, H);
+
+        float NoL = max(0, dot(N, L));
+        float NoH = max(0, dot(N, H));
+        float VoH = max(0, -dot(V, H));
+
+        if (NoL > 0 && NoV > 0)
+        {
+            // See the Heitz paper referenced above for the estimator explanation.
+            //   (BRDF / PDF) = F * G2(V, L) / G1(V)
+            // Assume G2 = G1(V) * G1(L) here and simplify that expression to just G1(L).
+            
+            float G1_NoL = G1_Smith(primary_roughness, NoL);
+            vec3 F = schlick_fresnel(primary_base_reflectivity, VoH, primary_specular_factor);
+
+            bounce_throughput *= G1_NoL * F;
+
+            bounce_throughput *= 1 / specular_pdf;
+            is_specular_ray = true;
+            bounce_direction = normalize(L);
+        }
+    }
+}
+// 发射diffuse光线
+if(!is_specular_ray)
+{
+    vec3 basis_normal, dir_sphere;
+#if ENABLE_SH
+    if(spec_bounce_index == 0 && global_ubo.flt_enable != 0)
+    {
+        dir_sphere = sample_cos_hemisphere_multi(0, 1, rng3, HEMISPHERE_UNIFORMISH);
+        basis_normal = geo_normal;
+    }
+    else
+#endif
+    {
+        dir_sphere = sample_cos_hemisphere(rng3);
+        basis_normal = normal;
+    }
+
+    mat3 basis = construct_ONB_frisvad(basis_normal);
+    bounce_direction = normalize(basis * dir_sphere);
+    // diffuse 和 specular 是互斥采样；这里除以选择 diffuse 的概率 (1 - specular_pdf) 做 1/pdf 补偿。
+    bounce_throughput *= 1 / (1 - specular_pdf);
+
+    vec3 L = bounce_direction.xyz;
+    vec3 V = -view_direction.xyz;
+    vec3 H = normalize(V + L);
+    float VoH = max(0, dot(V, H));
+
+    vec3 F = schlick_fresnel(primary_base_reflectivity, VoH, primary_specular_factor);
+
+    bounce_throughput *= vec3(1.0) - F;
+}
+
+Ray bounce_ray;
+bounce_ray.origin = position;
+bounce_ray.direction = bounce_direction;
+bounce_ray.t_min = 0;
+bounce_ray.t_max = 10000;
+
+trace_geometry_ray(bounce_ray, true, bounce_cull_mask);
+
+// specular ray 再 trace 特效
+if(is_specular_ray)
+{
+    if (found_intersection(ray_payload_geometry))
+        bounce_ray.t_max = ray_payload_geometry.hit_distance;
+
+    vec4 transparency = trace_effects_ray(bounce_ray, /* skip_procedural = */ true);
+    bounce_contrib += transparency.rgb * transparency.a * bounce_throughput * (1.0 - direct_specular_weight);
+}
+Triangle triangle = get_hit_triangle(ray_payload_geometry);
+
+// hit surface properties
+vec3 bary         = get_hit_barycentric(ray_payload_geometry);
+vec2 tex_coord    = triangle.tex_coords * bary;
+uint bounce_material_id = triangle.material_id;
+position;
+normal;
+geo_normal;
+basecolor;
+...
+
+ vec3 emissive = sample_emissive_texture(triangle.material_id, bounce_minfo, tex_coord, vec2(0), vec2(0), is_specular_ray ? 2 : 3);
+ emissive += get_emissive_shell(triangle.material_id, triangle.shell) * bounce_base_color;
+ // other emissive login
+ 
+ // 1 bounce gi
+ vec3 bounce_diffuse, bounce_specular;
+get_direct_illumination(
+    bounce_position, 
+    bounce_geo_normal, 
+    bounce_geo_normal, 
+    bounce_cluster_idx, 
+    bounce_material_id, 
+    shadow_cull_mask, 
+    bounce_direction, 
+    bounce_base_color,
+    vec3(0), // base_reflectivity
+    0.0, // specular_factor
+    1.0, // roughness
+    MEDIUM_NONE, 
+    false, // enable_caustics
+    0.0, // direct_specular_weight
+    global_ubo.pt_indirect_polygon_lights > 0,
+    global_ubo.pt_indirect_dyn_lights > 0,
+    is_gradient,
+    1, // bounce
+    bounce_diffuse,
+    bounce_specular);
+
+bounce_contrib += bounce_throughput * bounce_diffuse;
+
+imageStore(IMG_PT_GEO_NORMAL2, ipos, uvec4(encode_normal(bounce_geo_normal)));
+imageStore(IMG_PT_SHADING_POSITION, ipos, vec4(bounce_position.xyz, uintBitsToFloat(triangle.material_id)));
+imageStore(IMG_PT_VIEW_DIRECTION2, ipos, vec4(bounce_direction, 0));
+imageStore(IMG_PT_BOUNCE_THROUGHPUT, ipos, vec4(bounce_throughput, is_specular_ray ? 1 : 0));
+
+// denoise without f0
+if (is_specular_ray)
+    bounce_contrib = demodulate_specular(primary_base_reflectivity, bounce_contrib); 
+
+if(is_specular_ray)
+{
+    bounce_contrib *= STORAGE_SCALE_SPEC;
+
+    vec3 specular = unpackRGBE(imageLoad(IMG_PT_COLOR_SPEC, ipos).x);
+    specular += bounce_contrib;
+    imageStore(IMG_PT_COLOR_SPEC, ipos, uvec4(packRGBE(specular)));
+}
+else
+{
+    bounce_contrib *= STORAGE_SCALE_LF;
+
+    SH low_freq = load_SH(TEX_PT_COLOR_LF_SH, TEX_PT_COLOR_LF_COCG, ipos);
+
+#if ENABLE_SH
+    if(global_ubo.flt_enable == 0)
+        low_freq.shY.xyz += bounce_contrib;
+    else
+    {
+        accumulate_SH(low_freq, irradiance_to_SH(bounce_contrib, bounce_direction), 1.0);
+    }
+#else
+    low_freq.shY.xyz += bounce_contrib;
+#endif
+
+    STORE_SH(IMG_PT_COLOR_LF_SH, IMG_PT_COLOR_LF_COCG, ipos, low_freq);
+}
+
+```
+
+
+总结
+
+
+Diffuse GI 比较低频，Q2RTX 的 LF 通道不是完整 RGB SH，而是压缩成：
+- PT_COLOR_LF_SH：一阶 SH，也就是 L0 + L1 的 4 个系数，只存 Y/luma 的方向性。
+- PT_COLOR_LF_COCG：存 Co/Cg 色度，不存方向性，近似为平均 tint。
+- RGB 会先转到 YCoCg：Co = R - B，t = B + Co * 0.5，Cg = G - t，Y = t + Cg * 0.5。
+- SH 写入形式是：result.CoCg = vec2(Co, Cg)，result.shY = vec4(L11, L1_1, L10, L00) * Y。
+- 后续 ASVGF 滤波的是 SH + CoCg 这个 lighting representation；normal/depth 不被滤波，但会作为 edge-aware guide 参与滤波权重。最终 composite 前再用当前像素 normal 调用 project_SH_irradiance(filtered_lf, normal)，把 LF SH 投影回 RGB irradiance。
+
+Checkerboard field 不是单纯半分辨率优化
+Q2RTX 把最终屏幕的 checkerboard pixels de-interleave 到左右半屏：左半是 even field，右半是 odd field。这样每个 field 都是 dense image，便于 denoiser 做空间滤波；同时 reflection/refraction 可以分到不同 field，例如一半 field 走 reflection，一半 field 走 refraction。后续再用 checkerboard_interleave.comp 合回 flat image。
+
+Reflect/Refract pass 是 specular guide path，不只是视觉反射
+reflect_refract.rgen 会把水、玻璃、chrome、screen 等特殊材质后面看到的 secondary surface 写回 G-buffer，包括 position、normal、base color、material、visbuffer、motion/depth 等。这样后续 direct/indirect lighting 和 denoiser 看到的是“镜子/玻璃后面的表面”，而不是只有 primary glass/mirror surface。
+
+
+Ray cone / texture LOD 是 secondary ray 质量关键
+Primary pass 用相邻像素 primary ray 的夹角估计 half_cone_angle，secondary hit 时用 hit_distance * half_cone_angle 估算 footprint，再调用 compute_anisotropic_texture_gradients 计算纹理 LOD。否则反射/间接命中后的贴图采样会过锐、闪烁或 alias。
+
+
+Path throughput 是跨 pass 的能量账本
+IMG_PT_THROUGHPUT / IMG_PT_BOUNCE_THROUGHPUT 记录 reflection/refraction、medium extinction、Fresnel sampling correction、BRDF sampling correction 等路径权重。后续 lighting pass 算到的 radiance 都要乘这个 throughput 才是对 camera pixel 的贡献。
+
+Specular demodulation 提高 denoiser 稳定性
+SPEC channel 在写入前会用 demodulate_specular(base_reflectivity, specular) 除掉材质 F0/specular color，滤波后 composite 再用 modulate_specular 乘回去。这样 denoiser 处理的是更像“光照强度”的信号，而不是光照和金属颜色/贴图细节混在一起的结果。
+
+One-sample NEE + 重要性采样，比遍历所有灯更适合实时
+get_direct_illumination 每个 shading point 通常只打一条 shadow ray：先在 polygon lights 中 importance sample 一个候选，再 uniform sample 一个 dynamic light 候选，然后按贡献估计在 polygon/dynamic 之间二选一，并用 1/pdf 补偿。这样一个样本统计上代表整个候选灯集合。
+
+Light shadow statistics 是低成本的下一帧采样反馈
+Q2RTX 会统计每个 cluster / light / surface orientation 上 shadow ray 是 unshadowed 还是 shadowed，下一帧在 sample_polygonal_lights 里降低经常被挡住的灯的 mass，但保留下限避免完全不采。
+
+Geometry TLAS 和 Effects TLAS 分离
+Q2RTX 把真实几何和粒子、爆炸、sprite、beam 等 effects 放到不同 TLAS。Primary/secondary geometry ray 先找 surface，再用 effects ray 累积透明特效。这样普通 visibility 不必总是遍历 effects，也能给 effects 使用不同 hit shader / any-hit 逻辑。
+
+Half-res GI profile 不是简单降分辨率，而是降低路径复杂度
+pt_num_bounce_rays == 0.5 时，indirect pass 只在隔行像素上跑，并且默认不读取真实 metallic/roughness，等价于低质量 diffuse GI profile，避免半分辨率 specular 带来闪烁和错误重建。
+
+Ray Query / RT Pipeline 双路径值得保留抽象边界
+Q2RTX 同一套 rgen 逻辑会编译成 .pipeline.spv 和 .query.spv。RT pipeline 路径使用 SBT/hit shaders；Ray Query 路径则在 compute shader 内手动执行查询和 hit 逻辑。上层 pass 调度基本通过同一组 pipeline index 抽象。
+

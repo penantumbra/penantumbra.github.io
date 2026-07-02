@@ -1,0 +1,69 @@
+---
+layout: post
+title:  "SVGF"
+categories: ideas
+---
+
+...
+
+
+## SVGF
+
+Demodulate Albedo
+计算光照时忽略brdf中的材质信息，避免引入高频变化，以diffuse为例
+diffuse = L* rho * n * l / pi
+demodulate albedo = L * n * l / pi
+Temporal Accumulation
+和TAA的重投影类似，通过深度/法线/meshid来reject
+Variance Esitimation
+在时间上积累像素亮度的的一阶和二阶矩,mu_1, mu_2
+计算方差=mu_2 - mu_1^2
+Edge-Avoiding Atrous Wavelets
+Wavelet filter用于大范围滤波
+法线/深度作为edge avoiding算法避免模糊掉几何边缘
+$$\hat{c}_{i+1}(p)
+=
+\frac{
+    \sum_{q \in \Omega}
+    h(q)\, w(p,q)\, \hat{c}_i(q)
+}{
+    \sum_{q \in \Omega}
+    h(q)\, w(p,q)
+}$$
+vec3 sum = vec3(0);
+float weight_sum = 0;
+
+for q in neighborhood:
+    float weight = wavelet_kernel(q) // atrous wavelelt
+                 * depth_weight(p, q) // edge stopping
+                 * normal_weight(p, q)
+                 * luminance_weight(p, q);
+
+    sum += weight * color[q];
+    weight_sum += weight;
+
+color_out[p] = sum / weight_sum;
+
+墙壁的几何边缘不会被模糊掉
+
+Luminance Edge Stopping Function
+避免模糊掉阴影细节，通过上面计算的variance
+$$w(p,q)
+=
+\exp\left(
+    -
+    \frac{
+        \left| l_i(p) - l_i(q) \right|
+    }{
+        \sqrt{
+            g_{3 \times 3}\left(
+                \operatorname{Var}\left(l_i(p)\right)
+            \right)
+        }
+    }
+\right)$$
+Variance大->噪声多-> 增大模糊，降低噪点
+Variance小->噪声小-> 减小模糊，保留细节
+不过由于filter中对variance提前做了一遍高斯模糊来降低空域的噪声，一些阴影的细节会出现被模糊的情况
+阴影区域不会被模糊掉
+
