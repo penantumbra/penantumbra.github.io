@@ -68,3 +68,63 @@ Variance小->噪声小-> 减小模糊，保留细节
 不过由于filter中对variance提前做了一遍高斯模糊来降低空域的噪声，一些阴影的细节会出现被模糊的情况
 阴影区域不会被模糊掉
 
+## ASVGF
+
+解决拖影和细节丢失问题, 生成一张temporal gradient图，估计当前帧和历史帧的变化梯度
+
+```
+asvgf_gradient_reproject.comp
+    -> 生成 gradient sample positions
+path tracer
+    -> 对这些位置产生 gradient samples
+asvgf_gradient_img.comp
+    -> 根据当前/历史亮度差生成 gradient image
+asvgf_gradient_atrous.comp
+    -> 把稀疏 gradient 扩散成可用的低分辨率 gradient field
+asvgf_temporal.comp
+    -> 读取 gradient，做 anti-lag
+```
+
+Temporal Accumulation & AntiLag, 以primary ray hf为例, 权重alpha受这个temporal gradient的变化
+
+```
+    if(temporal_sample_valid_diff)
+    {
+        // Compute the antilag factors based on the gradients
+        float antilag_alpha_hf = clamp(mix(1.0, global_ubo.flt_antilag_hf * grad_hf_spec.x, global_ubo.flt_temporal_hf), 0, 1);
+
+        // Adjust the history length, taking the antilag factors into account
+        // gradient大，hist_len_hf小，历史帧越容易被丢弃
+        float hist_len_hf = min(temporal_moments_histlen_hf.b * pow(1.0 - antilag_alpha_hf, 10) + 1.0, 256.0);
+
+        // Compute the blending weights based on history length, so that the filter
+        // converges faster. I.e. the first frame has weight of 1.0, the second frame 1/2, third 1/3 and so on.
+        float alpha_color_hf = max(global_ubo.flt_min_alpha_color_hf, 1.0 / hist_len_hf);
+        float alpha_moments_hf = max(global_ubo.flt_min_alpha_moments_hf, 1.0 / hist_len_hf);
+
+        // Adjust the blending factors, taking the antilag factors into account again
+        alpha_color_hf = mix(alpha_color_hf, 1.0, antilag_alpha_hf);
+        alpha_moments_hf = mix(alpha_moments_hf, 1.0, antilag_alpha_hf);
+
+        // Blend!
+        out_color_hf.rgb = mix(temporal_color_hf.rgb, color_curr_hf.rgb, alpha_color_hf);
+
+        out_moments_histlen_hf.rg = mix(temporal_moments_histlen_hf.rg, spatial_moments_hf.rg, alpha_moments_hf);
+        out_moments_histlen_hf.b = hist_len_hf;
+    }
+```
+q2rtx impl
+
+在gbuffer生成后
+
+```
+一个 compute shader pass reproject到上一帧生成
+    imageStore(IMG_ASVGF_GRAD_SMPL_POS_A, pos_grad, uvec4(gradient_idx));
+
+    imageStore(IMG_ASVGF_GRAD_HF_SPEC_PING, pos_grad, vec4(found_prev_lum, 0, 0));
+
+    imageStore(IMG_ASVGF_RNG_SEED_A, ipos, texelFetch(TEX_ASVGF_RNG_SEED_B, found_pos_prev, 0));
+    imageStore(IMG_PT_NORMAL_A, ipos, texelFetch(TEX_PT_NORMAL_B, found_pos_prev, 0));
+    imageStore(IMG_PT_BASE_COLOR_A, ipos, texelFetch(TEX_PT_BASE_COLOR_B, found_pos_prev, 0));
+    imageStore(IMG_PT_METALLIC_A, ipos, texelFetch(TEX_PT_METALLIC_B, found_pos_prev, 0));
+```
