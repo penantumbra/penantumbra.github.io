@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "SVGF"
+title:  "Self Intersection"
 categories: ideas
 ---
 

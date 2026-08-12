@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "SVGF"
+title:  "Normal Fix"
 categories: ideas
 ---
 

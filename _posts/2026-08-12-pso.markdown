@@ -1,0 +1,184 @@
+---
+layout: post
+title:  "PSO"
+categories: ideas
+---
+
+...
+
+# PSO问题
+
+## 一、问题最初是怎么来的
+
+Vulkan 1.0 采用完整、单体的 `VkPipeline`，本意其实很合理：
+
+- 创建 PSO 时一次性交付 shader、vertex input、rasterization、depth/stencil、blend、render target 等状态。
+- 驱动可以提前完成编译、寄存器分配、跨阶段优化和硬件状态生成。
+- draw 时只绑定一个对象，避免旧 API 驱动在 draw path 做状态验证、shader patching 和隐式编译。
+- 应用能够明确控制昂贵工作发生的时间。
+
+问题是，很多真实引擎无法提前知道所有组合，尤其是：
+
+- 从 D3D11/OpenGL 转换来的 Source 2、DXVK、ANGLE、Zink；
+- 通用引擎和用户生成内容；
+- shader、材质、vertex format、render target、MSAA、blend 等分别产生组合；
+- streaming 内容只能在运行时逐步发现。
+
+于是出现二选一：
+
+1. 预编译所有组合：PSO 数量近似笛卡尔积，时间、内存和磁盘缓存迅速爆炸。
+2. 首次绘制时创建：产生数毫秒乃至更长的编译卡顿。
+
+SPIR-V 并没有根治问题，因为主要成本往往不是 source→IR，而是结合硬件和完整状态进行最终 lowering、链接和优化。2020 年 TSG 的判断也很直接：“没人真正知道怎样普遍地把它做好”，尤其是旧引擎和 API 转译层。
+
+## 二、API 演进时间线
+
+| 阶段 | API/设计 | 解决了什么 | 为什么还不够 |
+|---|---|---|---|
+| Vulkan 1.0 | 单体 `VkPipeline`、`VkPipelineCache` | 把编译从 draw 移到显式创建阶段，给驱动完整优化信息 | 要求应用过早知道完整状态；组合爆炸；缓存是黑盒 |
+| 2019–2021 | `VK_EXT_pipeline_creation_cache_control`、creation feedback、更多 dynamic state、dynamic rendering | 可以要求“cache miss 就返回”、提前失败、减少静态状态维度 | 主要是控制/缓解卡顿，并未消除编译和组合；dynamic state 还可能把 CPU/GPU 成本移回 draw |
+| 2020–2022 | `VK_EXT_graphics_pipeline_library`，GPL | 将完整 graphics PSO 拆成四个可复用部分，提前编译 shader，最后快速链接 | API 复杂；仍需最终 `VkPipeline`；快链接并非所有硬件都便宜；未优化链接可能损失 GPU 性能 |
+| 2022–2023 | `VK_EXT_shader_object` | 不再要求 graphics pipeline；每个 shader stage 独立创建/绑定，大量状态变为动态 | 独立 shader 缺少完整状态信息，部分硬件难以达到单体 PSO 性能，移动端尤其困难 |
+| 2021–2024 | `VK_KHR_pipeline_binary` | 把缓存中的驱动 binary 显式交给应用管理，可以去重、持久化并在不提供 SPIR-V 时重建 pipeline | 解决的是缓存与交付，不改变 graphics 状态模型 |
+| 2024–现在 | `VK_KHR_shader_object` 草案 | 在 Shader Object 模型中重新加入“选择性链接和优化”，争取兼得灵活性、低卡顿与单体性能 | 尚在设计/实现和 CTS 阶段，未正式发布 |
+
+### 1. 第一轮补丁：让 PSO 创建更可控
+
+`VK_EXT_pipeline_creation_cache_control` 提供：
+
+- `FAIL_ON_PIPELINE_COMPILE_REQUIRED`
+- `EARLY_RETURN_ON_FAILURE`
+- externally synchronized cache
+
+应用可以在关键线程上禁止意外编译，cache miss 后选择 fallback 或后台任务。它后来进入 Vulkan 1.3。
+
+但它只能告诉应用“这里会很贵”，不能让贵操作消失。TSG 还发现：
+
+- warm cache 仍可能太慢；
+- cache 内部条目不可枚举、逐项淘汰或去重；
+- 多线程共享 cache 存在锁和 merge 成本；
+- 应用已经在 cache 外面再造多级缓存，实际上是在“对抗” Vulkan cache。
+
+### 2. GPL：把组合乘法拆成加法
+
+`VK_EXT_graphics_pipeline_library` 把 graphics pipeline 分成：
+
+1. Vertex Input Interface
+2. Pre-Rasterization Shaders
+3. Fragment Shader
+4. Fragment Output Interface
+
+shader 部分可以很早编译，draw 时才创建少量状态片段并快速链接。对于原来有 `VS × FS × vertex format × render target` 个 PSO 的引擎，这能把大量重复编译拆成分别缓存和复用。
+
+同时存在两条路径：
+
+- fast link：尽快得到可执行 pipeline，避免卡顿；
+- link-time optimization：后台生成更优化的版本，回收 GPU 性能。
+
+这套机制在 Source 2 和 DXVK 上效果显著，2022-03-29 正式发布。
+
+局限也逐渐明显：
+
+- 没有 fast-link 能力时价值大幅降低；
+- pipeline layout、跨阶段接口和 static state 的兼容规则复杂；
+- 某些硬件必须在 link 时完成相当多工作；
+- 未优化链接会牺牲跨阶段优化、寄存器共享或 shader prologue/epilogue 质量；
+- 移动 GPU/tiler 更依赖提前知道完整状态；
+- API 仍围绕复杂的 `VkGraphicsPipelineCreateInfo` 和最终 `VkPipeline`。
+
+因此 GPL 被视为重要的过渡方案，而非最终状态模型。
+
+### 3. Shader Object：从根本上取消 graphics PSO 要求
+
+2022 年开始讨论“next-gen pipeline creation”，最终选择第三条路线：直接创建和绑定 shader。
+
+`VK_EXT_shader_object` 引入 `VkShaderEXT`：
+
+- 每个 shader stage 可以独立创建；
+- 多个 stage 也可以创建时链接；
+- shader 可以直接绑定；
+- 原先 PSO 中的大部分固定功能状态改成动态命令；
+- graphics draw 不必创建 `VkPipeline`。
+
+官方提案明确把目标描述为全面解决 pipeline abstraction 给应用和实现造成的问题。
+
+其设计原因是：
+
+- 更自然地映射 D3D11/OpenGL 和现代模块化引擎；
+- 不再让引擎提前猜 shader 与所有状态的组合；
+- API 状态模型明显更简单；
+- shader 编译与固定功能状态生命周期真正解耦。
+
+但 EXT 留下了一个核心缺口：它有 shader-stage linking，却没有充分的 state linking。驱动不知道足够的最终状态时，可能无法生成与单体 PSO 等价的最优代码。
+
+## 三、缓存问题的独立演进
+
+`VK_KHR_pipeline_binary` 是与 GPL/Shader Object 并行的一条线，不应混为同一种方案。
+
+它允许应用：
+
+- 根据 create info 获取 key；
+- 从 pipeline 提取一个或多个驱动 binary；
+- 自行去重、限制容量、做 LRU 和磁盘布局；
+- 从 binary 重建 pipeline；
+- binary 命中时不再提供或加载 SPIR-V；
+- 用 global key 判断驱动更新后旧 binary 是否仍有效。
+
+这解决了原 `VkPipelineCache` 太黑盒的问题，也支持 Steam、主机等 shader delivery 系统。
+
+不过 binary 仍是实现相关数据，不是跨 GPU 的标准 ISA；它解决“如何保存编译结果”，不解决“应用是否必须枚举完整 PSO”。
+
+## 四、最新的 KHR Shader Object 设计
+
+从 2024 年开始，`VK_KHR_shader_object` 的方向逐渐明确：
+
+1. 保留 EXT 的基本模型：shader 可以完全独立编译和绑定。
+2. 允许把相关 shader stages 链接起来。
+3. 允许提供少量、确实影响编译性能的状态进行 state linking。
+4. 查询当前硬件上某种链接或状态优化是否真的有收益。
+5. 只为热点 draw 编译优化变体，其余组合继续使用便宜、灵活的普通 shader object。
+6. 优化变体可后台生成，不阻塞首次使用。
+
+也就是：
+
+```text
+独立 Shader Object
+        ↓ 可立即使用
+链接相关 shader stages
+        ↓
+对热点组合加入必要状态并编译优化变体
+        ↓
+尽量恢复单体 PSO 性能
+```
+
+这吸收了 GPL 的“快速版本 + 后台优化版本”思想，但默认策略变成“先自由组合，热点才特化”，而不是为所有组合都建立 PSO。
+
+2026-07 的表述更明确：KHR 要补齐 EXT 缺少的优化能力和信息查询，通过 linking 与精心选择的 state setting 获得接近单体 pipeline 的性能，而不是重新枚举所有组合。
+
+## 五、未来会怎样发展
+
+确定性较高的方向是：
+
+- `VK_KHR_shader_object` 正在开发，但截至 2026-08 尚未正式发布。
+- Khronos 已同意公开表示：Shader Object 计划进入某个未来的 core，但没有承诺版本，也不能称为已经确定进入 Vulkan 1.5。
+- 长期 graphics API 主路径将从 `VkPipeline` 转向 Shader Object；旧 pipeline、GPL 和 descriptor set 仍会保持兼容。
+- KHR Shader Object 会与新的 descriptor heap 模型协同，获得真正的 per-stage resource binding。
+- GPL 很可能逐步退居兼容/实现层：理论上可在 Shader Object 上实现，但短期内不会删除，因为部分平台仍依赖 GPL 解决 hitch。
+- ray tracing、work graph、DataGraph 不能简单照搬 graphics Shader Object；工作组希望最终形成一致的多种 pipeline/shader API，而不是三套互不相同的体系。
+- 移动端仍是最大的不确定因素。桌面实现进展较快，但部分移动硬件需要完整跨阶段或固定状态信息，可能只能在新硬件上高效支持。
+- 不会在 KHR 中加入一个模糊的“花更长时间深度优化”总开关。工作组认为真实离线优化通常涉及大量厂商专有参数、反复运行和 auto-tuning；shader 预编译与分发将作为独立问题继续研究。
+- Dynamic state 的调用和重复解析成本仍可能催生批量 state-setting 或少量 compiled state object，但此前通用 state binary 方案没有形成共识：各硬件自然的状态分组不同，容易重新制造兼容性和缓存键问题。
+
+## 最终判断
+
+PSO 本身不是“错误设计”，它对能够预知全部状态、组合数量受控的应用依然能提供最强的可预测性和优化空间。真正的问题是 Vulkan 1.0 把它设成了几乎唯一的 graphics 使用模型。
+
+未来 Vulkan 更可能形成一条连续谱：
+
+- 不确定组合：独立 Shader Object，避免卡顿；
+- 已知 shader 关系：链接 shader stages；
+- 性能热点：附加必要状态，生成优化变体；
+- 离线部署：使用 shader/pipeline binary 与平台 shader delivery；
+- 老应用和旧硬件：继续使用完整 pipeline 或 GPL。
+
+本质变化是：不再要求应用在最开始就提交所有信息，而是允许应用随着确定性和性能需求增加，逐步向驱动披露更多信息。
