@@ -1,0 +1,303 @@
+---
+layout: post
+title:  "Vulkan Ray Tracing Acceleration Structure"
+categories: ideas
+---
+
+...
+
+加速结构（AS）通过空间层次组织场景，减少射线求交测试。Vulkan 将其分为两层：**BLAS 组织几何，TLAS 组织实例**。
+
+示例使用 Vulkan-Hpp，省略初始化和错误检查。`createBuffer()`、`destroyBuffer()`、`submitAndWait()` 为应用封装；buffer 封装负责分配、绑定和对齐，提供 `.buffer` 与 `.address`。
+
+使用 C++20 designated initializer，按成员声明顺序初始化。首次包含 Vulkan-Hpp 前关闭构造函数：
+
+```cpp
+#define VULKAN_HPP_NO_CONSTRUCTORS
+#include <vulkan/vulkan.hpp>
+```
+
+## 1. BLAS 与 TLAS
+
+一个 BLAS 可以包含多个 geometry。TLAS 的每个 instance 引用一个 BLAS，并指定变换、可见性 mask 等信息。
+
+```text
+TLAS
+├── instance 0：BLAS A，变换 T0
+├── instance 1：BLAS A，变换 T1
+└── instance 2：BLAS B，变换 T2
+```
+
+多个实例可以共享 BLAS。只改变物体变换时处理 TLAS；几何形状变化时处理对应 BLAS。下面以三角形为例。
+
+## 2. 构建 BLAS
+
+流程：**描述几何 → 查询大小 → 分配资源 → 执行构建**。
+
+### 描述输入几何
+
+`vk::AccelerationStructureGeometryKHR` 描述几何类型，以及顶点、索引的地址和格式。
+
+![三角形几何的输入数据与描述结构](https://docs.vulkan.org/tutorial/latest/_images/images/38_TASK02_blas_structures.png)
+
+```cpp
+vk::AccelerationStructureGeometryTrianglesDataKHR triangles{
+    .vertexFormat  = desc.vertex_format,
+    .vertexData    = {.deviceAddress = vertex_buffer.address + vertex_offset},
+    .vertexStride  = desc.vertex_stride,
+    .maxVertex     = vertex_count - 1,
+    .indexType     = desc.index_type,
+    .indexData     = {.deviceAddress = index_buffer.address + index_offset},
+    .transformData = {.deviceAddress = 0},  // 不提供额外几何变换，使用单位变换
+};
+
+vk::AccelerationStructureGeometryKHR geometry{
+    .geometryType = vk::GeometryTypeKHR::eTriangles,
+    .geometry     = {.triangles = triangles},
+    .flags        = vk::GeometryFlagBitsKHR::eOpaque,
+};
+
+vk::AccelerationStructureBuildRangeInfoKHR range{
+    .primitiveCount = index_count / 3,
+};
+```
+
+示例假设索引三角形列表非空，地址已包含数据偏移。`maxVertex` 是最大顶点索引，`vertexStride` 是顶点步长（字节）。
+
+输入 buffer 需要 `eAccelerationStructureBuildInputReadOnlyKHR`、`eShaderDeviceAddress` 及设备地址分配支持。
+
+`eOpaque` 用于不透明几何；使用 any-hit 做 alpha test 时，需要检查几何、实例和射线的不透明性标志。
+
+### 查询构建大小
+
+`build_info` 指定 AS 类型、构建模式、优化标志和输入几何。
+
+```cpp
+vk::AccelerationStructureBuildGeometryInfoKHR build_info{
+    .type          = vk::AccelerationStructureTypeKHR::eBottomLevel,
+    .flags         = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+    .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
+    .geometryCount = 1,
+    .pGeometries   = &geometry,
+};
+
+vk::AccelerationStructureBuildSizesInfoKHR sizes_info{};
+const uint32_t max_primitive_count = range.primitiveCount;
+device.getAccelerationStructureBuildSizesKHR(
+    vk::AccelerationStructureBuildTypeKHR::eDevice,
+    &build_info, &max_primitive_count, &sizes_info);
+```
+
+多个 geometry 需要对应的 geometry、range 和最大图元数量数组。`geometryCount` 是几何数量，不是 buffer 数量。
+
+查询返回三种大小：
+
+| 字段 | 用途 |
+| --- | --- |
+| `accelerationStructureSize` | AS 构建结果所需的存储空间 |
+| `buildScratchSize` | BUILD 操作所需的临时工作空间 |
+| `updateScratchSize` | UPDATE 操作所需的临时工作空间 |
+
+AS 内部布局由驱动管理。常见的[构建标志](https://docs.vulkan.org/refpages/latest/refpages/source/VkBuildAccelerationStructureFlagBitsKHR.html)选择如下：
+
+| 类型 | 常见选择 | 原因 |
+| --- | --- | --- |
+| 静态 BLAS | `ePreferFastTrace` | 构建少、遍历多 |
+| 动态 BLAS | `ePreferFastBuild` | 几何频繁变化 |
+| TLAS | `ePreferFastBuild` | 实例通常频繁变化 |
+
+实际选择取决于构建与遍历的总耗时。UPDATE 和 COMPACT 分别要求初始构建加入 `eAllowUpdate`、`eAllowCompaction`。
+
+### 分配存储
+
+```cpp
+auto as_buffer = createBuffer(
+    sizes_info.accelerationStructureSize,
+    vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+        vk::BufferUsageFlagBits::eShaderDeviceAddress);
+
+vk::AccelerationStructureCreateInfoKHR create_info{
+    .buffer = as_buffer.buffer,
+    .offset = 0,
+    .size   = sizes_info.accelerationStructureSize,
+    .type   = vk::AccelerationStructureTypeKHR::eBottomLevel,
+};
+vk::AccelerationStructureKHR blas =
+    device.createAccelerationStructureKHR(create_info);
+
+const auto scratch_alignment =
+    as_properties.minAccelerationStructureScratchOffsetAlignment;
+auto scratch_buffer = createBuffer(
+    sizes_info.buildScratchSize,
+    vk::BufferUsageFlagBits::eStorageBuffer |
+        vk::BufferUsageFlagBits::eShaderDeviceAddress,
+    scratch_alignment);
+```
+
+**创建 AS 对象不等于完成构建。** AS buffer 保存结果，scratch 提供临时空间。最终 scratch 地址必须对齐；手动偏移地址时，要为偏移后的完整区间预留空间。
+
+### 执行构建
+
+![BLAS 构建时的输入、scratch 与结果存储](https://docs.vulkan.org/tutorial/latest/_images/images/38_TASK02_blas_build.png)
+
+```cpp
+build_info.dstAccelerationStructure = blas;
+build_info.scratchData.deviceAddress = scratch_buffer.address;
+
+const vk::AccelerationStructureBuildRangeInfoKHR* ranges[] = {&range};
+// 在记录构建命令前，建立输入数据写入 -> AS 构建读取的依赖。
+command_buffer.buildAccelerationStructuresKHR(1, &build_info, ranges);
+
+// 后续使用 AS 前，还需要相应的构建写入 -> 读取依赖。
+submitAndWait(command_buffer);
+destroyBuffer(scratch_buffer);
+```
+
+命令提交并完成后才能回收 scratch。示例直接等待，实际渲染器可用 fence 或 timeline semaphore 延迟回收。
+
+## 3. 构建 TLAS
+
+TLAS 的构建流程与 BLAS 相同，输入换成 `vk::AccelerationStructureInstanceKHR` 数组。
+
+![TLAS 实例、变换矩阵与 BLAS 引用](https://docs.vulkan.org/tutorial/latest/_images/images/38_TASK03_tlas_structures.png)
+
+### 描述实例
+
+```cpp
+vk::AccelerationStructureInstanceKHR instance{
+    .transform                              = desc.transform_matrix,
+    .instanceCustomIndex                    = desc.mesh_index,
+    .mask                                   = 0xFF,
+    .instanceShaderBindingTableRecordOffset = 0,
+    .flags = static_cast<VkGeometryInstanceFlagsKHR>(
+        vk::GeometryInstanceFlagBitsKHR::eTriangleFacingCullDisable),
+    .accelerationStructureReference =
+        device.getAccelerationStructureDeviceAddressKHR(
+            vk::AccelerationStructureDeviceAddressInfoKHR{
+                .accelerationStructure = blas,
+            }),
+};
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `transform` | BLAS 局部坐标到场景坐标的 3×4 矩阵，注意存储顺序 |
+| `instanceCustomIndex` | 应用定义的 24 位索引 |
+| `mask` | 与射线的 cull mask 按位与，结果为 0 时跳过实例 |
+| `instanceShaderBindingTableRecordOffset` | 命中组 SBT 索引计算中的记录偏移 |
+| `accelerationStructureReference` | BLAS 的 AS 地址，不是 buffer 地址 |
+
+将实例上传到具备 `eAccelerationStructureBuildInputReadOnlyKHR` 和 `eShaderDeviceAddress` 用途的 buffer，并完成上传同步。
+
+### 描述实例数组并构建
+
+```cpp
+vk::AccelerationStructureGeometryKHR instances_geometry{
+    .geometryType = vk::GeometryTypeKHR::eInstances,
+    .geometry = {
+        .instances = {
+            .arrayOfPointers = false,
+            .data = {.deviceAddress = instances_buffer.address},
+        },
+    },
+};
+
+vk::AccelerationStructureBuildRangeInfoKHR tlas_range{
+    .primitiveCount = instance_count,
+};
+
+vk::AccelerationStructureBuildGeometryInfoKHR tlas_build_info{
+    .type          = vk::AccelerationStructureTypeKHR::eTopLevel,
+    .flags         = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastBuild,
+    .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
+    .geometryCount = 1,
+    .pGeometries   = &instances_geometry,
+};
+```
+
+TLAS 的 `geometryCount = 1`，`primitiveCount` 是实例数量，`arrayOfPointers = false` 表示连续数组。随后查询大小、分配 TLAS 和 scratch，再执行构建。
+
+BLAS 构建与引用它的 TLAS 构建必须建立依赖，不能放在同一次 build 调用中。[构建命令规则](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBuildAccelerationStructuresKHR.html)
+
+## 4. UPDATE 与重建
+
+初始构建包含 `eAllowUpdate` 时，可在满足兼容条件的前提下执行 UPDATE。更新输入数据后，沿用原有 geometry、range 和构建参数：
+
+```cpp
+build_info.mode = vk::BuildAccelerationStructureModeKHR::eUpdate;
+build_info.srcAccelerationStructure = blas;
+build_info.dstAccelerationStructure = blas;  // 原地更新
+build_info.scratchData.deviceAddress = update_scratch_address;
+
+const vk::AccelerationStructureBuildRangeInfoKHR* ranges[] = {&range};
+command_buffer.buildAccelerationStructuresKHR(1, &build_info, ranges);
+```
+
+更新 scratch 仍需对齐，大小至少为 `updateScratchSize`。
+
+| 场景变化 | 通常需要处理的层级 |
+| --- | --- |
+| 物体平移、旋转或缩放，几何不变 | 更新或重建 TLAS，复用 BLAS |
+| 顶点位置改变，三角形连接关系不变 | 符合限制时 UPDATE BLAS；若实例包围范围变化，再更新或重建 TLAS |
+| 三角形连接关系、图元数量或 geometry 数量改变 | 重新 BUILD 对应 BLAS，并处理受影响的 TLAS |
+| 实例数量改变 | 重新 BUILD TLAS |
+
+UPDATE 受格式、数量、拓扑和活动状态等[兼容条件](https://docs.vulkan.org/spec/latest/chapters/accelstructures.html)限制。大幅形变可能降低遍历效率，应同时评估重建成本与 trace 性能。
+
+## 5. BLAS 压缩
+
+初始构建包含 `eAllowCompaction` 后，可以查询压缩大小，再用 COMPACT copy 生成更紧凑的 BLAS：
+
+```text
+构建 BLAS（ALLOW_COMPACTION）
+    → 写入 compacted-size query
+    → 等待并读取查询结果
+    → 分配目标存储并创建新 BLAS
+    → 记录 COMPACT copy
+    → 完成复制并切换引用
+    → 安全回收旧 BLAS 与旧存储
+```
+
+### 查询压缩后的大小
+
+创建 `eAccelerationStructureCompactedSizeKHR` query pool，确保 BLAS 构建结果可见后查询：
+
+```cpp
+command_buffer.resetQueryPool(compaction_query_pool, 0, 1);
+command_buffer.writeAccelerationStructuresPropertiesKHR(
+    1, &blas,
+    vk::QueryType::eAccelerationStructureCompactedSizeKHR,
+    compaction_query_pool, 0);
+submitAndWait(command_buffer);
+
+vk::DeviceSize compacted_size = 0;
+const vk::Result query_result = device.getQueryPoolResults(
+    compaction_query_pool, 0, 1,
+    sizeof(compacted_size), &compacted_size, sizeof(compacted_size),
+    vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait);
+```
+
+检查查询结果，按 `compacted_size` 分配存储并创建 `compacted_blas`；收益不明显时可跳过压缩。
+
+### 复制并切换引用
+
+```cpp
+vk::CopyAccelerationStructureInfoKHR copy_info{
+    .src  = blas,
+    .dst  = compacted_blas,
+    .mode = vk::CopyAccelerationStructureModeKHR::eCompact,
+};
+command_buffer.copyAccelerationStructureKHR(copy_info);
+submitAndWait(command_buffer);
+```
+
+COMPACT 是 AS 专用复制操作，不能用普通 buffer copy 代替。[复制命令说明](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdCopyAccelerationStructureKHR.html)
+
+**压缩后 BLAS 地址改变。** 最好先压缩，再构建 TLAS；已有 TLAS 则需换用新地址并更新或重建。复制和旧 AS 的在途操作结束后，才能回收旧存储。压缩期间新旧存储同时存在，需考虑显存峰值。
+
+## 延伸阅读
+
+- [Vulkan 官方教程：Acceleration Structures](https://docs.vulkan.org/tutorial/latest/courses/18_Ray_tracing/02_Acceleration_structures.html)：BLAS/TLAS 的基础构建流程。
+- [NVIDIA Vulkan Ray Tracing Tutorial：Acceleration Structures](https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/concepts/acceleration-structures/)：结合 sample 理解构建与资源管理。
+- [nvpro_core2 acceleration_structures.hpp](https://github.com/nvpro-samples/nvpro_core2/blob/main/nvvk/acceleration_structures.hpp)：构建、批处理与压缩的 helper 接口。
+- [NVIDIA RTXMU](https://github.com/NVIDIA-RTX/RTXMU)：面向光追加速结构的内存管理库。
