@@ -52,9 +52,27 @@ const path = require('node:path');
       if ([375, 1440].includes(width)) {
         await page.screenshot({ path: `layout-screenshots/archive-${width}.png`, fullPage: true, animations: 'disabled' });
       }
-      for (const slug of ['', 'posts/']) {
+      for (const slug of ['', 'posts/', 'tags/', 'projects/', 'about/']) {
         await page.goto(`http://127.0.0.1:8765/${slug}`, { waitUntil: 'networkidle' });
         if (!await page.locator('a[href="/archive/"]').count()) throw new Error(`Missing Archive entry on /${slug}`);
+        const documentStyle = await page.evaluate(() => ({
+          width: document.documentElement.scrollWidth,
+          headings: document.querySelectorAll('h1').length,
+          main: document.querySelectorAll('main').length,
+          navigation: document.querySelectorAll('.site-nav').length,
+          font: getComputedStyle(document.body).fontFamily,
+          background: getComputedStyle(document.documentElement).backgroundColor,
+          brokenImages: [...document.images].filter(img => img.src.startsWith(location.origin) &&
+            (!img.complete || !img.naturalWidth)).map(img => img.getAttribute('src')),
+        }));
+        if (documentStyle.width > width + 1 || documentStyle.headings !== 1 || documentStyle.main !== 1 ||
+            documentStyle.navigation !== 2 || !documentStyle.font.includes('Times New Roman') ||
+            documentStyle.background !== 'rgb(255, 251, 251)' || documentStyle.brokenImages.length) {
+          throw new Error(`Classic /${slug} at ${width}px: ${JSON.stringify(documentStyle)}`);
+        }
+        if ([375, 1440].includes(width) && ['', 'posts/', 'tags/'].includes(slug)) {
+          await page.screenshot({ path: `layout-screenshots/${slug.replace('/', '') || 'home'}-${width}.png`, fullPage: true });
+        }
       }
       await page.close();
     }
