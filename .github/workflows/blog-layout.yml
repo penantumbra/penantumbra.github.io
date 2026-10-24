@@ -1,8 +1,9 @@
-name: Blog layout
+name: Blog layout and Pages
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, codex/classic-homepage-experiment]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -34,3 +35,25 @@ jobs:
         with:
           name: blog-layout-screenshots
           path: layout-screenshots/
+      - name: Upload Pages site
+        if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+    needs: build-and-layout
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy current default branch to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
