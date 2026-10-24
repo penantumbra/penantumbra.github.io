@@ -1,4 +1,12 @@
-# Moonrise Jekyll Theme
+# Penantumbra Tech Blogs
+
+Source for [penantumbra.github.io](https://penantumbra.github.io/).
+
+The company website at [penantumbra.com](https://penantumbra.com/) is maintained separately in the private [penantumbra/penantumbra.com](https://github.com/penantumbra/penantumbra.com) repository and deployed to Cloudflare Workers. This repository only builds and deploys the tech blog through GitHub Pages.
+
+## Original theme reference
+
+### Moonrise Jekyll Theme
 
 ###### (If you like this theme or using it, please give a :star: for motivation.)
 

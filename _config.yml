@@ -80,7 +80,6 @@ jekyll-mentions:
 exclude:
   [
     README.md,
-    infrastructure,
     Gemfile,
     Gemfile.lock,
     node_modules,
