@@ -1,0 +1,172 @@
+// Shared reading layout for every article, independent of its Markdown content.
+.post-page {
+    .wrapper {
+        width: calc(100% - 3rem);
+        max-width: 960px;
+        margin: 3rem auto;
+        padding: 3rem clamp(1.25rem, 5vw, 4rem);
+    }
+
+    .post-content {
+        min-width: 0;
+        padding: 0;
+        font-family: "Fira Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 16px;
+        line-height: 1.8;
+        text-align: left;
+        overflow-wrap: anywhere;
+    }
+
+    .post-title {
+        margin: 0 0 2.5rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid #e5e6e9;
+
+        h1 {
+            margin: 0 0 1rem;
+            font-size: clamp(1.75rem, 4vw, 2.5rem);
+            line-height: 1.3;
+        }
+
+        .post-date, .reading-time {
+            display: block;
+            margin: .25rem 0;
+            color: #666;
+            font-size: .875rem;
+            font-weight: normal;
+        }
+
+        .btn { margin-top: 1rem; }
+    }
+
+    .post-body {
+        > :first-child { margin-top: 0; }
+
+        h2, h3, h4, h5, h6 {
+            margin: 2em 0 .75em;
+            line-height: 1.4;
+            scroll-margin-top: 1.5rem;
+        }
+        h2 { font-size: 1.5em; }
+        h3 { font-size: 1.25em; }
+        h4 { font-size: 1.1em; }
+        p, ul, ol, dl { margin: 0 0 1.25em; }
+        ul, ol { padding-left: 1.6em; }
+        li { margin: .35em 0; }
+        li > p { margin-bottom: .5em; }
+        li > ul, li > ol { margin-bottom: .5em; }
+
+        a {
+            color: #215e9b;
+            text-decoration: underline;
+            text-underline-offset: .15em;
+            &:visited { color: #684f91; }
+            &:hover { color: #a32e26; }
+        }
+        a:focus-visible { outline: 2px solid #215e9b; outline-offset: 3px; }
+
+        blockquote {
+            margin: 1.5em 0;
+            padding: .75em 1.25em;
+            border-left: 4px solid #a5b8cd;
+            background: #f5f7fa;
+            font-family: inherit;
+            font-style: normal;
+            > :last-child { margin-bottom: 0; }
+        }
+
+        code, pre, kbd, samp {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        }
+        code {
+            padding: .1em .3em;
+            border: 1px solid #e0e4e8;
+            border-radius: 3px;
+            background: #f3f5f7;
+            font-size: .875em;
+            // Long inline identifiers wrap; source listings preserve whitespace.
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+        pre {
+            max-width: 100%;
+            margin: 1.5em 0;
+            padding: 1.25em;
+            overflow-x: auto;
+            border-radius: 4px;
+            background: #49483e;
+            color: #f8f8f2;
+            font-size: .875rem;
+            line-height: 1.6;
+            text-align: left;
+            white-space: pre;
+            overflow-wrap: normal;
+            tab-size: 4;
+        }
+        pre code {
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            font-size: inherit;
+            white-space: pre;
+            overflow-wrap: normal;
+        }
+        .highlighter-rouge, div.highlight { min-width: 0; max-width: 100%; }
+        div.highlighter-rouge { margin: 1.5em 0; }
+        .highlight pre { margin: 0; }
+        // Keep Rouge line-number tables inside the listing's own scroll area.
+        .highlight { overflow-x: auto; }
+        .highlight table { display: table; margin: 0; border: 0; }
+        .highlight td { padding: 0; border: 0; }
+
+        table {
+            display: block;
+            max-width: 100%;
+            width: 100%;
+            margin: 1.5em 0;
+            overflow-x: auto;
+            border-collapse: collapse;
+            font-size: .9em;
+            line-height: 1.6;
+        }
+        th, td {
+            padding: .65em .85em;
+            border: 1px solid #dfe3e8;
+            vertical-align: top;
+            text-align: left;
+        }
+        th { background: #f1f4f7; font-weight: 600; }
+        tbody tr:nth-child(even) { background: #fafbfc; }
+
+        img, video, iframe { max-width: 100%; }
+        img { height: auto; margin: 1.5em auto; }
+        figure { margin: 1.5em 0; padding: 0; }
+        figure img { margin: 0 auto; }
+        figcaption { padding-top: .5em; color: #666; font-size: .875em; line-height: 1.5; text-align: center; }
+        .MathJax_Display, mjx-container[display="true"] { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+    }
+
+    .entry-meta { margin-top: 2.5rem; }
+
+    @media only screen and (max-width: 48em) {
+        .wrapper { width: 100%; margin: 0 auto; padding: 2rem 1.25rem; box-shadow: none; }
+        .post-content { font-size: 16px; }
+        .post-title { margin-bottom: 2rem; }
+        .post-body pre { padding: 1em; font-size: .8125rem; }
+    }
+}
+
+.post-list .post-summary {
+    font-size: 1rem;
+    line-height: 1.7;
+    font-weight: normal;
+    overflow-wrap: anywhere;
+}
+.post-list .post-date { display: block; margin-top: .5em; color: #666; font-size: .875rem; }
+
+@media print {
+    .post-page .wrapper { width: 100%; max-width: none; margin: 0; padding: 0; box-shadow: none; }
+    .post-page .post-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}

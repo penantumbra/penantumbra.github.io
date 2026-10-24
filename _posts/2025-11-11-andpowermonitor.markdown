@@ -4,8 +4,6 @@ title:  "Use Scene to Monitor Android Power Consumption"
 categories: ideas
 ---
 
-...
-
 ### Scene8
 
 http://vtools.omarea.com/#/

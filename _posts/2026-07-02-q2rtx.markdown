@@ -4,9 +4,6 @@ title:  "Q2RTX codepath"
 categories: ideas
 ---
 
-...
-
-
 ## Q2RTX codepath
 
 

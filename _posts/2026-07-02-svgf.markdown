@@ -4,8 +4,6 @@ title:  "SVGF"
 categories: ideas
 ---
 
-...
-
 ## SVGF
 
 ### Demodulation

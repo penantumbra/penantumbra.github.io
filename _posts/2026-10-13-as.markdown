@@ -4,8 +4,6 @@ title:  "Vulkan Ray Tracing Acceleration Structure"
 categories: ideas
 ---
 
-...
-
 加速结构（AS）通过空间层次组织场景，减少射线求交测试。Vulkan 将其分为两层：**BLAS 组织几何，TLAS 组织实例**。
 
 示例使用 Vulkan-Hpp，省略初始化和错误检查。`createBuffer()`、`destroyBuffer()`、`submitAndWait()` 为应用封装；buffer 封装负责分配、绑定和对齐，提供 `.buffer` 与 `.address`。

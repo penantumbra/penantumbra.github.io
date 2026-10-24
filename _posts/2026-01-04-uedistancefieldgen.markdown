@@ -4,9 +4,6 @@ title:  "DistanceField Generation of Unreal"
 categories: ideas
 ---
 
-...
-
-
 ## DistanceField Generation of Unreal
 
 ```c++

@@ -4,7 +4,11 @@ title:  "analysis a android tombstone crash"
 categories: ideas
 ---
 
-adb pull /data/tombstones/ 拉一下tombstone文件
+拉取 tombstone 文件：
+
+```sh
+adb pull /data/tombstones/
+```
 
 ```
 Build fingerprint: 'Xiaomi/lhasa/lhasa:17/CP2A.260605.016/OS4.0.260921.1.XPNCNXM.PRE:userdebug/test-keys'
@@ -58,14 +62,21 @@ backtrace:
 ```
 
 拉取带符号的驱动文件
+
+```sh
 adb pull /xxx/libGLES_mali.so
+```
 
 用llvm-addr2line.exe和驱动文件寻找crash栈的函数名
+
+```bat
 @echo off
 set "TC=D:\Android\Sdk\ndk\29.0.14206865\toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-addr2line.exe"
 set "SYM=.\libGLES_mali1.so"
 
 "%TC%" -f -C -e "%SYM%" 0000000002900c3c 0000000002900c0c 0000000002877778
+```
+
 - -f：输出函数名（function name）。
 - -C：对 C++ 符号做反混淆（demangle），例如把 _ZN3foo3barEv 显示为 foo::bar()。
 - -e <文件>：指定要查地址的 ELF/共享库文件，例如 -e libGLES_mali1.so。

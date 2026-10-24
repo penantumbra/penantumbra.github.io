@@ -4,9 +4,6 @@ title:  "UE CPU Cooler"
 categories: ideas
 ---
 
-...
-
-
 ## UE CPU Cooler
 
 Unreal Engine’s frame limiter avoids sleeping all the way to the target frame time.

@@ -1,0 +1,36 @@
+name: Blog layout
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build-and-layout:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Jekyll and configured plugins
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jekyll ruby-jekyll-mentions ruby-jekyll-feed ruby-jekyll-sitemap ruby-jekyll-gist ruby-jekyll-seo-tag ruby-jekyll-paginate ruby-jekyll-include-cache
+      - name: Build the complete site
+        env:
+          JEKYLL_NO_BUNDLER_REQUIRE: 'true'
+        run: jekyll build --trace
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser checks
+        run: |
+          npm install --no-save --package-lock=false playwright@1.51.1
+          npx playwright install --with-deps chromium
+      - name: Check desktop and mobile articles
+        run: |
+          python3 -m http.server 8765 --directory _site > /tmp/blog-http.log 2>&1 &
+          node .github/scripts/check-layout.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blog-layout-screenshots
+          path: layout-screenshots/

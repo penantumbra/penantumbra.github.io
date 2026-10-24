@@ -4,8 +4,6 @@ title:  "Analysis Android Game Crash"
 categories: ideas
 ---
 
-...
-
 some times the game crash, and don't generate any crash dump or related log, then you need to use adb logcat to get sys infos to analyze crash.
 
 search keywords bwlow can help

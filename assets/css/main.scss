@@ -26,3 +26,5 @@ sitemap: false
 @import "vendor/magnific-popup/magnific-popup";
 @import "print";
 
+// Article-specific rules follow theme defaults.
+@import "post";
