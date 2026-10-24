@@ -35,10 +35,32 @@ const path = require('node:path');
           await page.screenshot({ path: `layout-screenshots/${slug}-${width}.png`, fullPage: true });
         }
       }
+      await page.goto('http://127.0.0.1:8765/archive/', { waitUntil: 'networkidle' });
+      const archive = await page.evaluate(() => ({
+        width: document.documentElement.scrollWidth,
+        links: [...document.querySelectorAll('.archive-list a')].map(a => a.getAttribute('href')),
+        dates: [...document.querySelectorAll('.archive-list time')].map(time => time.dateTime),
+        missingYearTargets: [...document.querySelectorAll('.archive-years a')]
+          .filter(a => !document.getElementById(a.hash.slice(1))).length,
+      }));
+      const expected = articles.map(entry => `/${entry.slug}/`).sort();
+      if (archive.width > width + 1 || archive.missingYearTargets ||
+          JSON.stringify(archive.links.slice().sort()) !== JSON.stringify(expected) ||
+          archive.dates.some((date, index) => index && date > archive.dates[index - 1])) {
+        throw new Error(`Archive at ${width}px: ${JSON.stringify(archive)}`);
+      }
+      if ([375, 1440].includes(width)) {
+        await page.screenshot({ path: `layout-screenshots/archive-${width}.png`, fullPage: true, animations: 'disabled' });
+      }
+      for (const slug of ['', 'posts/']) {
+        await page.goto(`http://127.0.0.1:8765/${slug}`, { waitUntil: 'networkidle' });
+        if (!await page.locator('a[href="/archive/"]').count()) throw new Error(`Missing Archive entry on /${slug}`);
+      }
       await page.close();
     }
-    console.log(`${articles.length} articles checked at 375, 768 and 1440px`);
+    console.log(`${articles.length} articles and archive checked at 375, 768 and 1440px`);
   } finally {
     await browser.close();
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
+

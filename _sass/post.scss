@@ -1,5 +1,5 @@
 // Shared reading layout for every article, independent of its Markdown content.
-.post-page {
+.post-page, .archive-page {
     .wrapper {
         width: calc(100% - 3rem);
         max-width: 960px;
@@ -171,4 +171,36 @@
 @media print {
     .post-page .wrapper { width: 100%; max-width: none; margin: 0; padding: 0; box-shadow: none; }
     .post-page .post-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+
+// Compact chronological index, sharing the article reading width and typography.
+.archive-page {
+    .archive-description { margin: 0 0 1rem; color: #666; font-weight: normal; }
+    .archive-years {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .75rem;
+        margin: 0 0 2rem;
+        a { padding: .35em .75em; border: 1px solid #dfe3e8; border-radius: 3px; text-decoration: none; }
+        span { color: #666; }
+    }
+    .archive-year {
+        margin-top: 2.5rem;
+        h2 { margin: 0 0 .75rem; font-size: 1.5rem; scroll-margin-top: 1.5rem; }
+        h2 span { margin-left: .5rem; font-size: .875rem; font-weight: normal; color: #666; }
+    }
+    .archive-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        li { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 1rem; padding: .8rem 0; border-bottom: 1px solid #eceff2; }
+        time { color: #666; font-size: .875rem; }
+        a { color: #215e9b; text-decoration: none; overflow-wrap: anywhere; }
+        a:hover { text-decoration: underline; }
+    }
+    a:focus-visible { outline: 2px solid #215e9b; outline-offset: 3px; }
+    @media only screen and (max-width: 30em) {
+        .archive-list li { grid-template-columns: 3.5rem minmax(0, 1fr); gap: .75rem; }
+    }
 }
