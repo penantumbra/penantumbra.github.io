@@ -4,8 +4,6 @@ title:  "Graphics Quality Configuration for Android"
 categories: ideas
 ---
 
-...
-
 ## UE
 
 Unreal Configure the default graphics quality in BaseDeviceProfiles.ini

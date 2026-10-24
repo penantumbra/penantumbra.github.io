@@ -4,11 +4,6 @@ title:  "DistanceField Generation of Unreal"
 categories: ideas
 ---
 
-...
-
-
-## DistanceField Generation of Unreal
-
 ```c++
 // Runtime\Engine\Private\StaticMesh.cpp
 void UStaticMesh::Serialize(FArchive& Ar)

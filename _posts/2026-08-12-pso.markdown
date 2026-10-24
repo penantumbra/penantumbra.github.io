@@ -1,13 +1,8 @@
 ---
 layout: post
-title:  "PSO"
+title:  "Tackling PSO Explosion in Vulkan: From Pipeline Caches to Shader Objects"
 categories: ideas
 ---
-
-...
-
-
-# Tackling PSO Explosion in Vulkan: From Pipeline Caches to Shader Objects
 
 A renderer may use only a modest number of shaders and still end up managing thousands of graphics pipelines. Different combinations of shader stages, vertex formats, attachment formats, and fixed-function state can quickly multiply into a large collection of pipeline state objects.
 

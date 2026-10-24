@@ -4,9 +4,6 @@ title:  "Self Intersection"
 categories: ideas
 ---
 
-...
-
-
 ## Ray Tracing Gems: A Fast and Robust Method for Avoiding  Self- Intersection
 
 在光线追踪中，从表面交点继续发射阴影、反射或折射光线时，新光线有时会立刻再次命中当前表面，从而产生异常黑斑、条纹等自遮挡现象。这通常不是真实的遮挡，而是浮点数误差引起的自相交（Self-Intersection）：自相交是原因，自遮挡是最终表现。

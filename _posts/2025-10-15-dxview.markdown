@@ -58,6 +58,6 @@ we want to render the each cascade with one render pass, so fill the `Texture2DA
 
 debug your program with a renderdoc framecap
 
-![alt text](image-1.png)
+![Illustration]({{ "/assets/img/posts/image-1.png" | relative_url }})
 
 to use the shadowmap in shading pass, you need to create a shaderresoureview for it, when you fill `D3D12_SHADER_RESOURCE_VIEW_DESC `, you should fill the `Texture2DArray.FirstArraySlice` with 0, and `Texture2DArray.ArraySize` with N. to access all slices in you texture2darray.

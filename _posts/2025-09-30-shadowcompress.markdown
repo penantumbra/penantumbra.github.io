@@ -16,7 +16,7 @@ compression ratio: 0.5
 
 use many planes to fit shadow map
 
-![alt text](image.png)
+![Illustration]({{ "/assets/img/posts/image.png" | relative_url }})
 
 plane fit:
 

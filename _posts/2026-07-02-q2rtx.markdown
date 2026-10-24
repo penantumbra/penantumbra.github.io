@@ -4,11 +4,6 @@ title:  "Q2RTX codepath"
 categories: ideas
 ---
 
-...
-
-
-## Q2RTX codepath
-
 
 ```
 #define MATERIAL_KIND_MASK           0xf0000000

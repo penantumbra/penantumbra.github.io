@@ -4,8 +4,6 @@ title:  "(WIP)Unreal Diffuse Indirect Light Explain"
 categories: ideas
 ---
 
-...
-
 ## LightMap
 
 ## SH
