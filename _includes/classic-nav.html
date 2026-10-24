@@ -1,5 +1,7 @@
 <nav class="site-nav" aria-label="{{ include.label | escape }}">
-    <a href="{{ '/' | relative_url }}"{% if page.url == '/' %} aria-current="page"{% endif %}>Home</a>
+    <a href="https://penantumbra.com/">Studio</a>
+    <span aria-hidden="true"> | </span>
+    <a href="{{ '/' | relative_url }}"{% if page.url == '/' %} aria-current="page"{% endif %}>Tech Blogs</a>
     <span aria-hidden="true"> | </span>
     <a href="{{ '/posts/' | relative_url }}"{% if page.layout == 'post-list' %} aria-current="page"{% endif %}>Posts</a>
     <span aria-hidden="true"> | </span>
