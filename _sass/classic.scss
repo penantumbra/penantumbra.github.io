@@ -1,0 +1,83 @@
+// A small, document-first theme inspired by classic personal homepages.
+// Keep browser typography and link conventions; constrain only rich content.
+html {
+  background: #fffbfb;
+  color: #000;
+  font-family: "Times New Roman", Times, "Noto Serif CJK SC", "Songti SC", SimSun, serif;
+  font-size: 16px;
+  color-scheme: light;
+}
+
+body {
+  margin: 8px;
+  overflow-wrap: anywhere;
+}
+
+a:link { color: #0000ee; }
+a:visited { color: #551a8b; }
+a { text-decoration: underline; }
+a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+.site-nav, .home-heading { text-align: center; }
+.site-nav { line-height: 1.6; }
+.site-footer { clear: both; margin-top: 2em; }
+.home-logo { width: 160px; height: auto; }
+.post-body { text-align: left; line-height: 1.45; }
+.post-date, .reading-time, .archive-count { font-size: 0.9em; }
+.reading-time { margin-top: 0.5em; }
+.post-summary { margin: 0.3em 0 1em; }
+.archive-years { line-height: 1.8; }
+.archive-years a { white-space: nowrap; }
+.archive-list li, .recent-posts li { margin: 0.25em 0; }
+.archive-list time { display: inline-block; min-width: 3.8em; }
+.entry-meta { margin-top: 2em; }
+.entry-tags a { margin-right: 0.5em; }
+.inline-list { padding-left: 0; }
+.inline-list li { display: inline; margin-right: 0.75em; line-height: 1.8; }
+
+img, video, iframe, svg { max-width: 100%; }
+img, video { height: auto; }
+figure { margin: 1em 0; }
+figcaption { font-size: 0.9em; }
+blockquote { margin: 1em 2em; }
+pre, code, kbd, samp { font-family: "Courier New", Courier, monospace; }
+code { font-size: 0.9em; }
+pre {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.75em;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  tab-size: 4;
+}
+pre code { font-size: inherit; }
+.highlight { margin: 1em 0; }
+.highlight pre { margin: 0; }
+.highlight .c, .highlight .c1, .highlight .cm, .highlight .cp { color: #555; }
+.highlight .k, .highlight .kd, .highlight .kt { font-weight: bold; }
+.highlight .s, .highlight .s1, .highlight .s2 { color: #7b2020; }
+table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+th, td { padding: 0.35em 0.6em; border: 1px solid #aaa; text-align: left; }
+.MathJax_Display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.skip-link { position: absolute; left: -10000px; }
+.skip-link:focus { position: static; }
+
+@media (max-width: 480px) {
+  .post-body { line-height: 1.5; }
+  blockquote { margin: 1em; }
+  ul, ol { padding-left: 1.5em; }
+}
+
+@media print {
+  html { background: white; }
+  .site-nav, .skip-link, #disqus_thread { display: none; }
+  pre, table { overflow: visible; width: auto; white-space: pre-wrap; }
+}

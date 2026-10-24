@@ -1,5 +1,5 @@
 # Site
-title: 左半右环
+title: Penantumbra
 bio: "A place for passing thoughts and ideas in progress."
 description: ""
 reading_time: true
@@ -9,7 +9,8 @@ background: "assets/img/bg.png"
 tiled_bg: false # Set this true if you want to tile your background image, otherwise it will be covered
 locale: en_US'
 
-url: https://penantumbra.com
+url: https://penantumbra.github.io
+baseurl: ""
 
 # Jekyll
 permalink: /:title/
@@ -79,6 +80,7 @@ jekyll-mentions:
 exclude:
   [
     README.md,
+    infrastructure,
     Gemfile,
     Gemfile.lock,
     node_modules,

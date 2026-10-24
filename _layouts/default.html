@@ -1,0 +1,26 @@
+---
+layout: compress
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {% include head.html %}
+</head>
+<body class="{{ page.layout | replace: 'post-list', 'posts' }}-page">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    {% include classic-nav.html label="Site navigation" %}
+    <main id="main-content">
+        {{ content }}
+    </main>
+    <footer class="site-footer">
+        {% include classic-nav.html label="Footer navigation" %}
+    </footer>
+    {% if page.comments and site.disqus_shortname %}
+    <section id="disqus_thread" aria-label="Comments"></section>
+    {% include disqus_comments.html %}
+    {% endif %}
+    {% if site.mathjax and page.layout != 'home' and page.layout != 'archive' and page.layout != 'post-list' %}
+    <script async src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    {% endif %}
+</body>
+</html>

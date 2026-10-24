@@ -1,56 +1,24 @@
 ---
-layout: compress
+layout: default
 ---
-<!DOCTYPE html>
-<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
-<!--[if (IE 7)&!(IEMobile)]><html class="no-js lt-ie9 lt-ie8"><![endif]-->
-<!--[if (IE 8)&!(IEMobile)]><html class="no-js lt-ie9"><![endif]-->
-<!--[if gt IE 8]><!-->
-<html class="no-js"><!--<![endif]-->
-
-<head>
-    {% include head.html %}
-</head>
-
-<body class="post-page">
-    <!-- {% include nav.html %} -->
-    <!-- Article -->
-    <main class="header" id="main-content">
-        <div class="wrapper animated fadeIn">
-            <article class="content post-content">
-                <header class="post-title {% if page.feature %} feature {% endif %}">
-                    <h1>{{ page.title | escape }}</h1>
-                    <time class="post-date" datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date_to_string }}</time>
-                    {% if site.reading_time %}
-                    <p class="reading-time">
-                        <i class="fa fa-clock-o"></i>
-                        {% include read-time.html %}
-                    </p><!-- /.entry-reading-time -->
-                    {% endif %}
-                    {% if page.project %}
-                    <a class="btn zoombtn" href="{{ "/projects/" | relative_url }}" aria-label="Back to projects">
-                    {% else %}
-                    <a class="btn zoombtn" href="{{ "/archive/" | relative_url }}" aria-label="Back to archive">
-                    {% endif %}
-                        <i class="fa fa-chevron-circle-left" aria-hidden="true"></i>
-                        {% if page.project %}Projects{% else %}Archive{% endif %}
-                    </a>
-                </header>
-                <div class="post-body">
-                    {{ content }}
-                </div>
-                <div class="entry-meta">
-                    {% include meta.html %}
-                </div>
-            </article>
-        </div>
-        
-    </main>
-    {% include scripts.html %}
-    {% if site.mathjax == true %}
-    <!-- MathJax -->
-    <script async src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
-    {% endif %}
-</body>
-
-</html>
+<article class="post-content">
+    <header class="post-title">
+        <h1>{{ page.title | escape }}</h1>
+        <time class="post-date" datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date_to_string }}</time>
+        {% if site.reading_time %}<p class="reading-time">{% include read-time.html %}</p>{% endif %}
+    </header>
+    <div class="post-body">
+        {{ content }}
+    </div>
+    <footer class="entry-meta">
+        {% if page.tags.size > 0 %}
+        <p class="entry-tags">Tags:
+            {% for tag in page.tags %}
+            {% assign tag_path = '/tags/#' | append: tag %}
+            <a href="{{ tag_path | relative_url }}">{{ tag | escape }}</a>
+            {% endfor %}
+        </p>
+        {% endif %}
+        <p><a href="{{ '/archive/' | relative_url }}">Back to archive</a></p>
+    </footer>
+</article>
