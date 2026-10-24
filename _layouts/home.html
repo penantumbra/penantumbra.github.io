@@ -1,17 +1,9 @@
 ---
 layout: default
 ---
-{% assign articles = site.posts | where_exp: "post", "post.project == nil" %}
 <header class="home-heading">
     <h1>{{ site.title | escape }}</h1>
     {% if site.logo %}<img class="home-logo" src="{{ site.logo | relative_url }}" alt="{{ site.title | escape }}">{% endif %}
 </header>
 <p>{{ site.bio | escape }}</p>
 {{ content }}
-<h2>Recent posts</h2>
-<ul class="recent-posts">
-    {% for post in articles limit:10 %}
-    <li><a href="{{ post.url | relative_url }}">{{ post.title | escape }}</a> — <time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: '%Y-%m-%d' }}</time></li>
-    {% endfor %}
-</ul>
-<p><a href="{{ '/archive/' | relative_url }}">All {{ articles.size }} articles, grouped by year</a>.</p>
