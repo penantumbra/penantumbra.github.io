@@ -4,8 +4,6 @@ title:  "UE4 LightMap Directionality"
 categories: ideas
 ---
 
-## UE4 LightMap Directionality
-
 ![Illustration]({{ "/assets/img/posts/image-2.png" | relative_url }})
 
 From [UE4 Lightmap Format Analysis](https://zhuanlan.zhihu.com/p/68754084), Unreal encodes a direction channel in the lower half of the lightmap to interact with the pixel normal.

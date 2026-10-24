@@ -116,6 +116,8 @@
         .highlighter-rouge, div.highlight { min-width: 0; max-width: 100%; }
         div.highlighter-rouge { margin: 1.5em 0; }
         .highlight pre { margin: 0; }
+        .highlight .c, .highlight .cm, .highlight .cp,
+        .highlight .c1, .highlight .cs { color: #c5c4b7; }
         // Keep Rouge line-number tables inside the listing's own scroll area.
         .highlight { overflow-x: auto; }
         .highlight table { display: table; margin: 0; border: 0; }
