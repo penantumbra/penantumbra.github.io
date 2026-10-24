@@ -30,9 +30,10 @@ layout: compress
                     {% if page.project %}
                     <a class="btn zoombtn" href="{{ "/projects/" | relative_url }}" aria-label="Back to projects">
                     {% else %}
-                    <a class="btn zoombtn" href="{{ "/posts/" | relative_url }}" aria-label="Back to posts">
+                    <a class="btn zoombtn" href="{{ "/archive/" | relative_url }}" aria-label="Back to archive">
                     {% endif %}
                         <i class="fa fa-chevron-circle-left" aria-hidden="true"></i>
+                        {% if page.project %}Projects{% else %}Archive{% endif %}
                     </a>
                 </header>
                 <div class="post-body">

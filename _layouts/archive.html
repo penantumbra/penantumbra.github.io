@@ -1,0 +1,47 @@
+---
+layout: compress
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {% include head.html %}
+</head>
+<body class="archive-page">
+    <main class="header" id="main-content">
+        <div class="wrapper">
+            <div class="content post-content">
+                {% assign articles = site.posts | where_exp: "post", "post.project == nil" %}
+                {% assign years = articles | group_by_exp: "post", "post.date | date: '%Y'" %}
+                <header class="post-title">
+                    <h1>{{ page.title | escape }}</h1>
+                    <p class="archive-description">{{ articles.size }} articles, grouped by year.</p>
+                    <nav aria-label="Site navigation">
+                        <a class="btn" href="{{ '/' | relative_url }}">Home</a>
+                        <a class="btn" href="{{ '/posts/' | relative_url }}">Posts</a>
+                    </nav>
+                </header>
+                <nav class="archive-years" aria-label="Jump to year">
+                    {% for year in years %}
+                    <a href="#year-{{ year.name }}">{{ year.name }} <span>({{ year.items.size }})</span></a>
+                    {% endfor %}
+                </nav>
+                {% for year in years %}
+                <section class="archive-year" aria-labelledby="year-{{ year.name }}">
+                    <h2 id="year-{{ year.name }}">{{ year.name }} <span>{{ year.items.size }} articles</span></h2>
+                    <ul class="archive-list">
+                        {% for post in year.items %}
+                        <li>
+                            <time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: '%b %d' }}</time>
+                            <a href="{{ post.url | relative_url }}">{{ post.title | escape }}</a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+                {% endfor %}
+                {% if articles.size == 0 %}<p>No articles yet.</p>{% endif %}
+            </div>
+        </div>
+    </main>
+    {% include scripts.html %}
+</body>
+</html>
