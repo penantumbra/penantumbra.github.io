@@ -1,0 +1,120 @@
+---
+layout: post
+title:  "OMM Survey"
+categories: ideas
+---
+
+> Opacity Micro Map for Ray Tracing Survey
+
+## Background: Why OMM?
+
+RTCore is dedicated hardware for ray-scene intersection. In practice, however, the visible shape of many objects is not defined by geometry alone. Foliage is the classic example: a leaf is usually a simple quad with an alpha texture, and its real silhouette comes from alpha testing.
+
+To support this, DXR exposes the Any-Hit Shader (AHS), which lets the application decide at runtime whether to accept or ignore a given intersection. The problem is that AHS is expensive:
+
+- Every invocation forces the GPU to switch between RTCore and the ShaderCore.
+- On the ShaderCore, an extra alpha texture fetch is usually needed to make the decision.
+
+In foliage-heavy scenes, AHS is often the largest part of the ray tracing cost. This led to a simple idea: bake the alpha texture into a set of subdivided micro-triangles, so the hardware can resolve most intersections with a lookup and skip the AHS. That is the core of the Opacity Micromap (OMM).
+
+The rest of this post walks through how OMM has evolved, in chronological order.
+
+## 2020 | STOC: Sub-triangle Opacity Masks
+
+Paper: *Sub-triangle opacity masks for faster ray tracing of transparent objects*, by Holger Gruen (now at AMD) et al.
+
+The method recursively subdivides each triangle and bakes the opacity from the alpha texture into the resulting sub-triangles. At a high enough subdivision level, the result closely approximates sampling the alpha texture directly.
+
+![image.png](图片和附件/image%205.png)
+
+Each sub-triangle is assigned one of three states:
+
+| State | Meaning | At intersection time |
+| --- | --- | --- |
+| Opaque | The whole sub-triangle is opaque | Accept the hit |
+| Transparent | The whole sub-triangle is transparent | Ignore the hit |
+| Unknown | The sub-triangle is partly opaque, partly transparent | Invoke the AHS and sample alpha |
+
+The first two states are resolved by reading a few state bits; only the third falls back to the AHS. Finer subdivision shrinks the Unknown region and reduces AHS calls, at the cost of more storage.
+
+## 2022 | OMM in Hardware: DXR Opacity Micromaps
+
+In 2022, DXR introduced an OMM extension, meaning the STOC approach had been built into GPU hardware by the vendors.
+
+A quick recap: the BVH used for ray tracing is a tree whose leaf nodes hold the original triangle data. The RTCore intersection unit reads these nodes and tests them against the ray. With the OMM extension, leaf nodes also carry OMM data, so RTCore can read it and resolve opacity in hardware, without switching back to the ShaderCore.
+
+![image.png](图片和附件/image%206.png)
+
+The ordering of sub-triangles within an OMM is also designed for spatial locality.
+
+![image.png](图片和附件/image%207.png)
+
+On the production side, *Alan Wake 2* (2023) shipped with OMM and used it to reduce path tracing cost in its foliage-dense scenes.
+
+## 2023 | IMG: Compressed Opacity Maps for Ray Tracing
+
+Paper: <https://diglib.eg.org/server/api/core/bitstreams/c5b73779-98f7-4570-bfe0-836531ddc63c/content>
+
+![image.png](图片和附件/image%204.png)
+
+### Motivation: quads instead of triangles
+
+IMG made two observations:
+
+1. Alpha-tested foliage is almost always built from quads.
+2. Many IHV implementations already pair the two triangles that share an edge in a leaf node, to save vertex memory.
+
+![image.png](图片和附件/image.png)
+
+So they proposed using **quads** instead of triangles as the OMM subdivision unit, combined with lossy VQ (vector quantization) compression.
+
+### VQ2x2
+
+Each subdivision level splits a cell into 4 children, and each child is in one of three states: T (transparent), O (opaque), or C (unknown).
+
+- A 2x2 block therefore has 3^4 = 81 possible combinations.
+- In real data, T and O never appear together in the same 2x2 block, so mixed blocks follow only two patterns: CT and CO.
+- With this constraint, each block fits in 5 bits.
+
+![image.png](图片和附件/image%203.png)
+
+2x2 patterns are also symmetric, which allows a further 2–4x compression.
+
+![image.png](图片和附件/image%209.png)
+
+Finally, a pattern-to-LUT table is built, under 256b in size (16x16). If a pattern is missing from the table during decoding, it falls back to C, which defers to the AHS and keeps the result correct.
+
+Result: at 16x16 subdivision and the same memory budget, AHS invocations drop by about 10%.
+
+### VQ4x4
+
+VQ2x2 gives limited gains at 16x16. The authors therefore apply VQ4x4 to 32x32 subdivision, again at 256b of memory, and report about 10% fewer AHS invocations compared with uncompressed 32x32 OMMs.
+
+## 2024 / 2026 | Lossless Compression
+
+- **2024: Succinct Opacity Micromaps**, based on succinct tree encoding.
+- **2026: Common Subtree Merging Compressed Opacity Micromaps**, based on an SVDAG that merges repeated subtrees.
+
+Both are lossless and cut OMM memory dramatically, but neither brings much performance gain:
+
+- Succinct OMMs get slower at high subdivision levels.
+- The SVDAG approach performs roughly on par with uncompressed OMMs.
+
+## Beyond Opacity: What Else Can the Acceleration Structure Hold?
+
+Reference: [Rendering Small Things: Hardware Micromaps and Particles](https://www.gustafwaldemarson.com/posts/rendering-small-things/)
+
+Gustaf Waldemarson explored a natural follow-up question: if the acceleration structure can store OMMs, can it store other data too?
+
+- **Displacement Micromaps**: store per-sub-triangle displacement for finer geometric detail.
+- **Color Micromaps**: store per-sub-triangle color.
+
+## Summary
+
+OMM has evolved in three steps:
+
+1. **The algorithm** (STOC, 2020): subdivision plus a three-state mask moves most alpha-test decisions out of the AHS.
+2. **Hardware adoption** (DXR, 2022): OMM data lives in BVH leaf nodes and is resolved directly by RTCore.
+3. **Compression** (2023 onward): lossy VQ compression further reduces AHS calls at the same memory budget, while lossless schemes mainly save memory with little performance gain.
+
+Extensions such as Displacement and Color Micromaps suggest that baking more data into the acceleration structure, and letting fixed-function hardware act on it, still has plenty of room to explore.
